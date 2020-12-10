@@ -1,0 +1,19 @@
+name: parliament
+dependencies:
+  - python>=3.7
+  - cython
+  - ipython
+  - numpy
+  - pandas
+  - seaborn
+  - scipy
+  - pathlib
+  - matplotlib
+  - pyqt
+  - jupyter
+  - pip
+  - pip:
+    - pathlib
+    - ventmap>=1.4.7
+channels:
+  - conda-forge
