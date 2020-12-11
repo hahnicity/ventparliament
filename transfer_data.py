@@ -41,7 +41,7 @@ def get_plat_data(output_base_dir, patient_id, plat_time, hostname, host_data_di
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument('-o', '--output-dir', default='dataset')
+    parser.add_argument('-o', '--output-dir', default='dataset/raw_data/')
     parser.add_argument('-d', '--cohort-description', default='cohort.csv', help='Path to file describing the cohort')
     parser.add_argument('-p', '--only-patient', help='Only gather data for specific patient id')
     parser.add_argument('-ho', '--hostname', help='server hostname to grab data from', default='b2c-main')

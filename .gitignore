@@ -5,6 +5,7 @@ __pycache__/
 
 # repo specific items
 cohort.csv
+dataset/
 
 # C extensions
 *.so
