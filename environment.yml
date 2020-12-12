@@ -6,7 +6,7 @@ dependencies:
   - numpy
   - pandas
   - seaborn
-  - scipy
+  - scipy=1.4.1
   - pathlib
   - matplotlib
   - pyqt
