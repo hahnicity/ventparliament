@@ -78,7 +78,7 @@ def objective(S, T, U, x):
     return S + T.dot(x) + x.dot(U).dot(x)
 
 
-def _setup_constrained_optimization(flow, pressure, vols, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess):
+def _setup_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess):
     if isinstance(initial_guess, type(None)):
         initial_guess = np.random.rand(len(flow)+2)
     # all code come from the optimization of eq 2. in the paper
@@ -95,7 +95,7 @@ def _setup_constrained_optimization(flow, pressure, vols, x0, m_idx, r_max, r_mi
     obj = lambda x: objective(S, T, U, x)
     ieq_con = lambda p_mus: bm_ineq.dot(p_mus)
     eq_con = lambda p_mus: bm_eq.dot(p_mus)
-    return obj, initial_guess, ieq_con, bounds, ieq_con, eq_con
+    return obj, initial_guess, bounds, ieq_con, eq_con
 
 
 def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, e_max=100, e_min=0, p_min=-15, p_max=20, initial_guess=None):
@@ -115,7 +115,7 @@ def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100,
                   points m between 0 and x0. Then you can determine which value m gives you the
                   lowest residual and then use that value for you final result.
     """
-    obj, initial_guess, ieq_con, bounds, ieq_con, eq_con = _setup_constrained_optimization(
+    obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess
     )
     # this can get an error "x0 violates bound constraints if you have scipy 1.5.X. So as a result,
@@ -146,7 +146,7 @@ def optimize_insp_lim_only(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, 
                   of PC/PS.
     """
     flow, pressure, vols = flow[:x0], pressure[:x0], vols[:x0]
-    obj, initial_guess, ieq_con, bounds, ieq_con, eq_con = _setup_constrained_optimization(
+    obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess
     )
     result = fmin_slsqp(obj, initial_guess, ieqcons=[ieq_con], bounds=bounds)
