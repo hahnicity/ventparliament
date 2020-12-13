@@ -46,7 +46,6 @@ class FileCalculations(object):
             "exp_least_squares": self.exp_least_squares,  # functional
             "howe_least_squares": self.howe_least_squares,  # functional
             "insp_least_squares": self.insp_least_squares,  # functional
-            "brunner": self.brunner,
             "vicario_nieap": self.vicario_nieap,  # functional
             "al_rawas": self.al_rawas,  # functional
             'predator': self.predator,  # functional
@@ -62,6 +61,8 @@ class FileCalculations(object):
         # possible indices and finding what works best for a specific breath. For speed
         # sake here, we just set it to a single number.
         self.al_rawas_idx = kwargs.get('al_rawas_idx', 15)
+        # this is the number of iterations to run brunner's algo for
+        self.brunner_iters = kwargs.get('brunner_iters', 2)
         # this is the auc threshold to determine if a breath is asynchronous or not
         # for the Kannangara algo
         self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.05)
@@ -84,8 +85,9 @@ class FileCalculations(object):
         bm = self.breath_metadata.iloc[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         pressure = breath['pressure']
+        peep = self._get_median_peep(breath_idx)
         plat, compliance, res, K, residual = func(
-            flow_l_s, pressure, bm.x0_index, breath['dt'], self.peep, bm.tvi/1000.0
+            flow_l_s, pressure, bm.x0_index, breath['dt'], peep, bm.tvi/1000.0
         )
         return compliance
 
@@ -110,9 +112,30 @@ class FileCalculations(object):
         )
         return comp
 
+    def al_rawas_tau(self, breath_idx):
+        """
+        Get Al-Rawas tau time const
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow_l_s = [v/60.0 for v in breath['flow']]
+        tvi = bm.tvi/1000.0,
+        return al_rawas_expiratory_const(flow_l_s, bm.x0_index, breath['dt'], tvi, self.al_rawas_tol)
+
     def brunner(self, breath_idx):
-        # XXX
-        pass
+        """
+        Get the brunner tau time constant.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        # brunner recommends using a MA filter to smooth the flow curve and perform approximations.
+        # for our purpose currently we will not implement this. We can move to optimizations later.
+        tau = brunner(bm.tve/1000, bm.eTime, abs(min(breath['flow'])/60), self.brunner_iters)
+        return tau
 
     def exp_least_squares(self, breath_idx):
         """
@@ -216,7 +239,8 @@ class FileCalculations(object):
         # Have option of using a variety of time constants, but lets just use al-rawas for now.
         # We can add configurability in the future.
         peep = self._get_median_peep(breath_idx)
-        tau = al_rawas_expiratory_const(flow_l_s, bm.x0_index, breath['dt'], tvi, self.al_rawas_tol)
+        #tau = al_rawas_expiratory_const(flow_l_s, bm.x0_index, breath['dt'], tvi, self.al_rawas_tol)
+        tau = self.brunner(breath_idx)
         if tau is not np.nan:
             plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
             return comp

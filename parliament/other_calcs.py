@@ -68,30 +68,36 @@ def al_rawas_calcs(flow, pressure, x0_index, dt, pip, peep, tvi, compliance_idx,
 
 def brunner(tve, e_time, f_min, iters):
     """
-    Perform the recursive brunner function
+    Perform the recursive brunner function. This provides an estimate of the
+    expiratory time constant tau. tau is defined as the time it takes the lungs to
+    inflate to 63% of volume or deflate by 63%. tau is the product of resistance and compliance.
 
     Brunner JX, Laubscher TP, Banner MJ, Iotti G, Braschi A. Simple method to measure total
     expiratory time constant based on the passive expiratory flow-volume curve. Critical
     care medicine. 1995 Jun 1;23(6):1117-22.
+
+    :param tve: expiratory volume in liters (L)
+    :param e_time: expiratory time in seconds
+    :param f_min: abs value of maximum expiratory flow rate in L/s
+    :param iters: number iterations to perform on the algorithm
     """
-    if f_min == 0:
+    if f_min == 0 or tve == 0 or e_time == 0:
         return np.nan
 
-    if tve == 0:
-        return np.nan
-
-    def _brunner():
-        return (tve / 1000) / abs(f_min / 60)
-
-    bru_0 = _brunner()
-    # XXX I think if brunner_0 > 1 then we're basically bound for
-    # exponential growth and non-convergence. So we should investigate this.
-    bru = bru_0 * (1 / (1 - math.exp(-1 * e_time / bru_0)))
+    bru = tve / f_min
     for i in range(iters):
-        denominator = (1 - math.exp(-1 * e_time / bru))
-        if denominator == 0:
-            return np.nan
-        bru = bru * (1 / denominator)
+        # this should only explode if (1 - e^(-e_time/bru)) gets very small. This would happen in
+        # the case that e^(-e_time/bru) -> 1 => -e_time/bru -> 0. This could presumably happen
+        # as bru outgrows e_time significantly, which is kinda a chicken and the egg thing. It
+        # will only explode if it explodes.
+        #
+        # The main thing to ask is whether this grows or decreases over time tho. If it grows,
+        # then additional iterations should only hurt us.
+        #
+        # OK I did the math and this function will increase in the case that
+        # (t_e * e^(t_e/bru)) / bru * (t_e + bru) < 1. So we might be able to use this to guide
+        # iterative bounds. For now though I'm going to stick to the paper.
+        bru = bru * (1 / (1 - math.exp(-e_time/bru)))
     return bru
 
 
