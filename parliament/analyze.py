@@ -6,7 +6,14 @@ from ventmap.constants import META_HEADER
 from ventmap.raw_utils import read_processed_file
 from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
-from parliament.other_calcs import al_rawas_calcs, brunner, least_squares_method, vicario_nieap
+from parliament.other_calcs import (
+    al_rawas_calcs,
+    brunner,
+    expiratory_least_squares,
+    howe_expiratory_least_squares,
+    inspiratory_least_squares,
+    vicario_nieap
+)
 from parliament.predator import perform_predator_algo
 from parliament.pressure_ctrl_correction import perform_algo as kannangara
 from parliament.vicario_constrained import perform_constrained_optimization
@@ -19,7 +26,7 @@ class FileCalculations(object):
 
         :param filename: filename to analyze
         :param algorithms_to_use: Algorithms you want to include in your analysis. Should
-        be a list and consist of choices: 'vicario_co', 'kannangara', 'least_squares',
+        be a list and consist of choices: 'vicario_co', 'kannangara', 'insp_least_squares',
         'brunner', 'vicario_nieap', ' al_rawas'
         :param peeps_to_use: Number of PEEPs to use when we calculate a median
         :param recorded_compliance: Compliance pre-recorded for the file.
@@ -36,7 +43,9 @@ class FileCalculations(object):
         self.algo_mapping = {
             "vicario_co": self.vicario_constrained,  # functional
             "kannangara": self.kannangara,  # functional
-            "least_squares": self.least_squares,  # functional
+            "exp_least_squares": self.exp_least_squares,
+            "howe_least_squares": self.howe_least_squares,
+            "insp_least_squares": self.insp_least_squares,  # functional
             "brunner": self.brunner,
             "vicario_nieap": self.vicario_nieap,
             "al_rawas": self.al_rawas,  # functional
@@ -83,6 +92,43 @@ class FileCalculations(object):
         # XXX
         pass
 
+    def _perform_least_squares(self, breath_idx, func):
+        """
+        Helper method for the least squares methods
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow_l_s = np.array(breath['flow']) / 60
+        pressure = breath['pressure']
+        plat, compliance, res, K, residual = func(
+            flow_l_s, pressure, bm.x0_index, breath['dt'], bm.PEEP, bm.tvi/1000.0
+        )
+        return compliance
+
+    def exp_least_squares(self, breath_idx):
+        """
+        Perform least squares analysis on the expiratory flow waveform.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        return self._perform_least_squares(breath_idx, expiratory_least_squares)
+
+    def howe_least_squares(self, breath_idx):
+        """
+        Perform least squares analysis using Howe's method of modifying the expiratory waveform
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        return self._perform_least_squares(breath_idx, howe_expiratory_least_squares)
+
+    def insp_least_squares(self, breath_idx):
+        """
+        Perform standard least squares analysis on the inspiratory flow waveform.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        return self._perform_least_squares(breath_idx, inspiratory_least_squares)
+
     def kannangara(self, breath_idx):
         # XXX I want the algos to basically pull the info they need, and not be reliant
         # on the analyze_breath function to do their work. This way we allow users to have
@@ -92,21 +138,6 @@ class FileCalculations(object):
         if sols[0]:
             return sols[0]
         return np.nan
-
-    def least_squares(self, breath_idx):
-        """
-        Perform standard least squares analysis on the inspiratory flow waveform.
-
-        :param breath_idx: relative index of the breath we want to analyze in our file.
-        """
-        breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
-        flow_l_s = np.array(breath['flow']) / 60
-        pressure = breath['pressure']
-        plat, compliance, res, K, residual = least_squares_method(
-            flow_l_s, pressure, bm.x0_index, breath['dt'], bm.PEEP, bm.tvi/1000.0
-        )
-        return compliance
 
     def predator(self, breath_idx):
         """

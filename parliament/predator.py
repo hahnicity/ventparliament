@@ -17,7 +17,7 @@ Presumably PREDATOR could be used for either flow or pressure waveforms.
 """
 import numpy as np
 
-from parliament.other_calcs import least_squares_method
+from parliament.other_calcs import inspiratory_least_squares
 
 
 def perform_pressure_reconstruction(pressure_waveforms):
@@ -50,4 +50,4 @@ def perform_predator_algo(pressure_waveforms, flow, x0_index, dt, peep, tvi):
     # pressure in prior breaths.
     reconstructed_pressure = perform_pressure_reconstruction(pressure_waveforms)
     reconstructed_pressure = reconstructed_pressure[:len(flow)]
-    return least_squares_method(flow, reconstructed_pressure, x0_index, dt, peep, tvi)
+    return inspiratory_least_squares(flow, reconstructed_pressure, x0_index, dt, peep, tvi)
