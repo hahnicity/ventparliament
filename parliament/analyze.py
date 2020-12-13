@@ -8,6 +8,7 @@ from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
 from parliament.other_calcs import (
     al_rawas_calcs,
+    al_rawas_expiratory_const,
     brunner,
     expiratory_least_squares,
     howe_expiratory_least_squares,
@@ -32,7 +33,6 @@ class FileCalculations(object):
         :param recorded_compliance: Compliance pre-recorded for the file.
         """
         self.algorithms_to_use = algorithms_to_use
-        self.peeps = []
         self.peeps_to_use = peeps_to_use
         self.results = []
         self.results_cols = ['gold_stnd_compliance'] + algorithms_to_use
@@ -43,11 +43,11 @@ class FileCalculations(object):
         self.algo_mapping = {
             "vicario_co": self.vicario_constrained,  # functional
             "kannangara": self.kannangara,  # functional
-            "exp_least_squares": self.exp_least_squares,
-            "howe_least_squares": self.howe_least_squares,
+            "exp_least_squares": self.exp_least_squares,  # functional
+            "howe_least_squares": self.howe_least_squares,  # functional
             "insp_least_squares": self.insp_least_squares,  # functional
             "brunner": self.brunner,
-            "vicario_nieap": self.vicario_nieap,
+            "vicario_nieap": self.vicario_nieap,  # functional
             "al_rawas": self.al_rawas,  # functional
             'predator': self.predator,  # functional
         }
@@ -62,6 +62,9 @@ class FileCalculations(object):
         # possible indices and finding what works best for a specific breath. For speed
         # sake here, we just set it to a single number.
         self.al_rawas_idx = kwargs.get('al_rawas_idx', 15)
+        # this is the auc threshold to determine if a breath is asynchronous or not
+        # for the Kannangara algo
+        self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.05)
         # This is a constant used in PREDATOR to determine how many breaths backward we
         # should be looking to make our approximation of the pressure (or flow) curve
         self.predator_n_breaths = kwargs.get('predator_n_breaths', 5)
@@ -73,25 +76,6 @@ class FileCalculations(object):
         self.vicario_co_residual = kwargs.get('vicario_co_residual', 200)
         self.filename = filename
 
-    def al_rawas(self, breath_idx):
-        flow_l_s = [v/60.0 for v in self.flow]
-        tau, plat, comp, res = al_rawas_calcs(
-            flow_l_s,
-            self.pressure,
-            self.x0,
-            self.dt,
-            self.pip,
-            self.peep,
-            self.tvi/1000.0,
-            self.al_rawas_idx,
-            self.al_rawas_tol
-        )
-        return comp
-
-    def brunner(self, breath_idx):
-        # XXX
-        pass
-
     def _perform_least_squares(self, breath_idx, func):
         """
         Helper method for the least squares methods
@@ -101,9 +85,34 @@ class FileCalculations(object):
         flow_l_s = np.array(breath['flow']) / 60
         pressure = breath['pressure']
         plat, compliance, res, K, residual = func(
-            flow_l_s, pressure, bm.x0_index, breath['dt'], bm.PEEP, bm.tvi/1000.0
+            flow_l_s, pressure, bm.x0_index, breath['dt'], self.peep, bm.tvi/1000.0
         )
         return compliance
+
+    def _get_median_peep(self, breath_idx):
+        min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
+        return self.breath_metadata.iloc[min_idx:breath_idx+1].PEEP.median()
+
+    def al_rawas(self, breath_idx):
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow_l_s = [v/60.0 for v in breath['flow']]
+        tau, plat, comp, res = al_rawas_calcs(
+            flow_l_s,
+            breath['pressure'],
+            bm.x0_index,
+            breath['dt'],
+            bm.PIP,
+            self._get_median_peep(breath_idx),
+            bm.tvi/1000.0,
+            self.al_rawas_idx,
+            self.al_rawas_tol
+        )
+        return comp
+
+    def brunner(self, breath_idx):
+        # XXX
+        pass
 
     def exp_least_squares(self, breath_idx):
         """
@@ -130,10 +139,16 @@ class FileCalculations(object):
         return self._perform_least_squares(breath_idx, inspiratory_least_squares)
 
     def kannangara(self, breath_idx):
-        # XXX I want the algos to basically pull the info they need, and not be reliant
-        # on the analyze_breath function to do their work. This way we allow users to have
-        # more programmatic control over the object in question
-        sols = kannangara(self.flow, self.pressure, self.x0, self.peep, 0.05)
+        """
+        Perform Kannangara's method of pressure control correction
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = breath['flow']
+        peep = self._get_median_peep(breath_idx)
+        sols = kannangara(flow, breath['pressure'], bm.x0_index, self.kannangara_thresh)
         # return compliance only
         if sols[0]:
             return sols[0]
@@ -154,7 +169,8 @@ class FileCalculations(object):
         flow_l_s = np.array(breaths[-1]['flow']) / 60
         dt = breaths[-1]['dt']
         bm = self.breath_metadata.iloc[breath_idx]
-        plat, compliance, res, K, residual = perform_predator_algo(pressure_data, flow_l_s, bm.x0_index, dt, bm.PEEP, bm.tvi/1000.0)
+        peep = self._get_median_peep(breath_idx)
+        plat, compliance, res, K, residual = perform_predator_algo(pressure_data, flow_l_s, bm.x0_index, dt, peep, bm.tvi/1000.0)
         return compliance
 
     def vicario_constrained(self, breath_idx):
@@ -172,8 +188,15 @@ class FileCalculations(object):
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = breath['flow']
+        dt = breath['dt']
+        # need to divide by 60 here because we are expressing dx in terms of seconds. If we
+        # didnt want to divide by 60 then we would need to express dx in terms of minutes
+        vols = np.array([0] + [simps(flow[:i]/60, dx=dt) for i in range(2, len(flow)+1)])
         elas, res, p_mus, pao_preds, residual = perform_constrained_optimization(
-            self.flow, self.volumes, self.pressure, self.x0, self.vicario_co_m_idx
+            flow, vols, breath['pressure'], bm.x0_index, self.vicario_co_m_idx
         )
         if residual > self.vicario_co_residual:
             return np.nan
@@ -181,40 +204,39 @@ class FileCalculations(object):
 
     def vicario_nieap(self, breath_idx):
         """
-        XXX
-        """
-        # XXX ensure that tc is part of the breath_metadata information
-        if tc is not np.nan:
-            flow_l_s = self.flow / 60
-            return vicario_nieap(flow_l_s, self.pressure, self.x0, self.peep, self.tvi/1000.0, self.tc)
-        else:
-            return np.nan
+        Perform vicario's method for NonInvasive Estimation of Alveolar Pressure (NIEAP).
 
-    def analyze_breath(self, breath_idx):
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata.iloc[breath_idx]
-        rel_bn = breath['rel_bn']
-        self.dt = breath['dt']
-        self.e_time = bm.eTime
-        # returns tvi and tve in terms of ml
-        self.tvi = bm.tvi
-        self.tve = bm.tve
-        self.pip = bm.PIP
-        self.peeps.append(bm.PEEP)
-        self.peep = np.median(self.peeps[-self.peeps_to_use:])
-        self.x0 = bm.x0_index
-        self.flow = np.array(breath['flow'])
-        self.pressure = np.array(breath['pressure'])
-        # gets volumes in liters for entire breath
-        #
-        # need to divide by 60 here because we are expressing dx in terms of seconds. If we
-        # didnt want to divide by 60 then we would need to express dx in terms of minutes
-        self.volumes = np.array([0] + [simps(self.flow[:i]/60, dx=self.dt) for i in range(2, len(self.flow)+1)])
-        # XXX needs method to find tau (exp time const)
+        flow_l_s = np.array(breath['flow']) / 60
+        pressure = breath['pressure']
+        tvi = bm.tvi / 1000
+        # Have option of using a variety of time constants, but lets just use al-rawas for now.
+        # We can add configurability in the future.
+        peep = self._get_median_peep(breath_idx)
+        tau = al_rawas_expiratory_const(flow_l_s, bm.x0_index, breath['dt'], tvi, self.al_rawas_tol)
+        if tau is not np.nan:
+            plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
+            return comp
+        return np.nan
 
-        found_plat, plat = calc_inspiratory_plateau(self.flow, self.pressure, self.dt)
+    def analyze_breath(self, breath_idx):
+        """
+        Analyze a single breath with all algorithms that we have specified to use. Save results
+        to some object so we can analyze them later.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = np.array(breath['flow'])
+        pressure = np.array(breath['pressure'])
+        dt = breath['dt']
+        tvi = bm.tvi
+        peep = self._get_median_peep(breath_idx)
+        found_plat, plat = calc_inspiratory_plateau(flow, pressure, dt)
         if found_plat:
-            gold = (self.tvi / 1000.0) / (plat - self.peep)
+            gold = (tvi / 1000.0) / (plat - peep)
             self.last_gold = gold
             breath_results = [gold]
         else:
@@ -237,6 +259,7 @@ class FileCalculations(object):
         # XXX need to fix this so its compatible for use with a dataframe
         #return self.results_analysis()
 
+    # XXX need to redo this function
     def results_analysis(self):
         """
         Calculate Median Average Deviation (MAD) between gold standard and a calculation

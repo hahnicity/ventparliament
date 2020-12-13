@@ -16,7 +16,7 @@ def al_rawas_expiratory_const(flow, x0_index, dt, tvi, linregress_tol):
     :param flow: array vals of flow measurements in L/s
     :param x0_index: index where flow crosses 0
     :param dt: time delta between obs
-    :param tvi: TVi in L/s
+    :param tvi: TVi in L
     :param linregress_tol: tolerance for the residual on linear regression
     """
     if len(flow[x0_index:]) <= int(.5 / dt):
@@ -247,12 +247,12 @@ def vicario_nieap(flow, pressure, x0_index, peep, tvi, tau):
     :param x0_index: index where flow crosses 0
     :param peep: positive end expiratory pressure
     :param tvi: TVi in L
-    :param tau: Time constant
+    :param tau: The expiratory time constant
 
     :returns tuple: plateau pressure, compliance, resistance
     """
     # return a nan if we are not going to get a sensible response from the algo.
-    if (tvi/tai) + flow[x0_index-1] - flow[0] < 0.0:
+    if (tvi/tau) + flow[x0_index-1] - flow[0] < 0.0:
         return np.nan
     resistance = (pressure[x0_index-1] - pressure[0]) / ((tvi/tau) + flow[x0_index-1] - flow[0])
     elastance = resistance / tau
