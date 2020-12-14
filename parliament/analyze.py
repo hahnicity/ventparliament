@@ -6,6 +6,7 @@ from ventmap.constants import META_HEADER
 from ventmap.raw_utils import read_processed_file
 from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
+from parliament.mipr import perform_mipr
 from parliament.other_calcs import (
     al_rawas_calcs,
     al_rawas_expiratory_const,
@@ -48,6 +49,7 @@ class FileCalculations(object):
             "howe_least_squares": self.howe_least_squares,
             "insp_least_squares": self.insp_least_squares,
             "kannangara": self.kannangara,
+            'mipr': self.mipr,
             'polynomial': self.polynomial,
             'predator': self.predator,
             "vicario_co": self.vicario_constrained,
@@ -71,6 +73,8 @@ class FileCalculations(object):
         self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.05)
         # lourens tc to use. Options available are 25, 50, 75, 100
         self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 50)
+        # number of iters to run mipr for
+        self.mipr_iters = kwargs.get('mipr_iters', 20)
         # This is a constant used in PREDATOR to determine how many breaths backward we
         # should be looking to make our approximation of the pressure (or flow) curve
         self.predator_n_breaths = kwargs.get('predator_n_breaths', 5)
@@ -203,6 +207,20 @@ class FileCalculations(object):
         tve = bm.tve / 1000
         tc_option = {25: 0, 50: 1, 75: 2, 100: 3}[self.lourens_tc_choice]
         return lourens_time_const(flow, tve, bm.x0_index, breath['dt'])[tc_option]
+
+    def mipr(self, breath_idx):
+        """
+        Performs MIPR
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        pressure = np.array(breath['pressure'])
+        peep = self._get_median_peep(breath_idx)
+        comp, resist, residual, code = perform_mipr(flow, pressure, bm.x0_index, peep, self.mipr_iters)
+        return comp
 
     def polynomial(self, breath_idx):
         """
