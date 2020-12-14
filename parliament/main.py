@@ -16,9 +16,9 @@ def main():
     all_patient_dirs = Path(args.data_path).glob('*')
     for dir_ in sorted(list(all_patient_dirs)):
         for file in dir_.glob('*.raw.npy'):
-            algo = 'vicario_nieap'
+            algo = 'polynomial'
             calcs = FileCalculations(str(file), [algo, 'insp_least_squares'], 9)
-            analysis = calcs.analyze_file()
+            calcs.analyze_file()
             preds = calcs.results[algo]
             gt = calcs.results['gold_stnd_compliance']
             import IPython; IPython.embed()

@@ -13,8 +13,10 @@ from parliament.other_calcs import (
     expiratory_least_squares,
     howe_expiratory_least_squares,
     inspiratory_least_squares,
+    lourens_time_const,
     vicario_nieap
 )
+from parliament.polynomial_model import perform_polynomial_model
 from parliament.predator import perform_predator_algo
 from parliament.pressure_ctrl_correction import perform_algo as kannangara
 from parliament.vicario_constrained import perform_constrained_optimization
@@ -41,14 +43,15 @@ class FileCalculations(object):
             get_production_breath_meta(breath) for breath in self.breath_data
         ], columns=META_HEADER)
         self.algo_mapping = {
-            "vicario_co": self.vicario_constrained,  # functional
-            "kannangara": self.kannangara,  # functional
-            "exp_least_squares": self.exp_least_squares,  # functional
-            "howe_least_squares": self.howe_least_squares,  # functional
-            "insp_least_squares": self.insp_least_squares,  # functional
-            "vicario_nieap": self.vicario_nieap,  # functional
-            "al_rawas": self.al_rawas,  # functional
-            'predator': self.predator,  # functional
+            "al_rawas": self.al_rawas,
+            "exp_least_squares": self.exp_least_squares,
+            "howe_least_squares": self.howe_least_squares,
+            "insp_least_squares": self.insp_least_squares,
+            "kannangara": self.kannangara,
+            'polynomial': self.polynomial,
+            'predator': self.predator,
+            "vicario_co": self.vicario_constrained,
+            "vicario_nieap": self.vicario_nieap,
         }
         self.last_gold = np.nan if not recorded_compliance else recorded_compliance
         # Al-Rawas finds the expiratory time const via a regression on the
@@ -66,9 +69,20 @@ class FileCalculations(object):
         # this is the auc threshold to determine if a breath is asynchronous or not
         # for the Kannangara algo
         self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.05)
+        # lourens tc to use. Options available are 25, 50, 75, 100
+        self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 50)
         # This is a constant used in PREDATOR to determine how many breaths backward we
         # should be looking to make our approximation of the pressure (or flow) curve
         self.predator_n_breaths = kwargs.get('predator_n_breaths', 5)
+        # time const algo to use. by default we use al-rawas because its fiddly constant is
+        # relatively easy to pick. Brunner has a weird non-converging iters term, and lourens
+        # you need to pick which time const you want to use, which can vary from patient to
+        # patient and breath to breath.
+        self.tc_algo = {
+            'al_rawas': self.al_rawas_tau,
+            'brunner': self.brunner,
+            'lourens': self.lourens_tau
+        }[kwargs.get('tc_algo', 'al_rawas')]
         # this is the m_index for vicario. This is another const that is supposed to
         # be found by sensitivity analysis, but here we just set to a const
         self.vicario_co_m_idx = kwargs.get('vicario_co_m_idx', 15)
@@ -120,8 +134,8 @@ class FileCalculations(object):
         """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata.iloc[breath_idx]
-        flow_l_s = [v/60.0 for v in breath['flow']]
-        tvi = bm.tvi/1000.0,
+        flow_l_s = np.array(breath['flow']) / 60
+        tvi = bm.tvi/1000.0
         return al_rawas_expiratory_const(flow_l_s, bm.x0_index, breath['dt'], tvi, self.al_rawas_tol)
 
     def brunner(self, breath_idx):
@@ -176,6 +190,34 @@ class FileCalculations(object):
         if sols[0]:
             return sols[0]
         return np.nan
+
+    def lourens_tau(self, breath_idx):
+        """
+        Perform lourens time const and return RCfv25, ... RCfv100 depending on your choice
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        tve = bm.tve / 1000
+        tc_option = {25: 0, 50: 1, 75: 2, 100: 3}[self.lourens_tc_choice]
+        return lourens_time_const(flow, tve, bm.x0_index, breath['dt'])[tc_option]
+
+    def polynomial(self, breath_idx):
+        """
+        Performs Redmond's polynomial model
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        pressure = np.array(breath['pressure'])
+        peep = self._get_median_peep(breath_idx)
+        tvi = bm.tvi/1000
+        comp, resist, resid, code = perform_polynomial_model(flow, pressure, bm.x0_index, peep, tvi)
+        return comp
 
     def predator(self, breath_idx):
         """
@@ -239,8 +281,7 @@ class FileCalculations(object):
         # Have option of using a variety of time constants, but lets just use al-rawas for now.
         # We can add configurability in the future.
         peep = self._get_median_peep(breath_idx)
-        #tau = al_rawas_expiratory_const(flow_l_s, bm.x0_index, breath['dt'], tvi, self.al_rawas_tol)
-        tau = self.brunner(breath_idx)
+        tau = self.tc_algo(breath_idx)
         if tau is not np.nan:
             plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
             return comp
