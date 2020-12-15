@@ -6,6 +6,7 @@ from ventmap.constants import META_HEADER
 from ventmap.raw_utils import read_processed_file
 from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
+from parliament.iipr import perform_iipr_algo
 from parliament.mipr import perform_mipr
 from parliament.other_calcs import (
     al_rawas_calcs,
@@ -47,6 +48,7 @@ class FileCalculations(object):
             "al_rawas": self.al_rawas,
             "exp_least_squares": self.exp_least_squares,
             "howe_least_squares": self.howe_least_squares,
+            'iipr': self.iipr,
             "insp_least_squares": self.insp_least_squares,
             "kannangara": self.kannangara,
             'mipr': self.mipr,
@@ -170,6 +172,20 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         return self._perform_least_squares(breath_idx, howe_expiratory_least_squares)
+
+    def iipr(self, breath_idx):
+        """
+        Perform IIPR for reconstructing pressure waveforms in volume control
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        pressure = np.array(breath['pressure'])
+        peep = self._get_median_peep(breath_idx)
+        com, resist, residual, code = perform_iipr_algo(flow, pressure, bm.x0_index, peep, breath['dt'])
+        return com
 
     def insp_least_squares(self, breath_idx):
         """
