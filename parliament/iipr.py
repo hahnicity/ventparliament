@@ -10,6 +10,8 @@ from copy import copy
 import numpy as np
 from scipy.integrate import simps
 
+from parliament.other_calcs import inspiratory_least_squares
+
 IMPLAUSIBLE_PRESSURE = -1000
 
 
@@ -194,13 +196,16 @@ def find_best_left_right_shoulders(pressure, left_shldrs, right_shldrs, shear_mi
 
 def perform_single_iter_reconstruction(flow, pressure, vols, dt):
     """
-    :returns tuple: reconstructed pressure, compliance, resistance, residual, response code
+    Perform a single iteration of pressure reconstruction following the first 7 steps of the
+    IIPR algorithm
+
+    :returns tuple: reconstructed pressure, response code
     """
     # step 1
     shear_left, shear_right = find_shoulders(flow, pressure, dt)
     # no shear transform found
     if not shear_left or not shear_right:
-        return None, None, None, None, 2
+        return None, 2
 
     # step 2
     #
@@ -234,7 +239,7 @@ def perform_single_iter_reconstruction(flow, pressure, vols, dt):
                 cur_crossing = []
 
     if len(crossings) == 0:
-        return None, None, None, None, 3
+        return None, 3
 
     shear_mins = []
     for crossing in crossings:
@@ -274,8 +279,7 @@ def perform_single_iter_reconstruction(flow, pressure, vols, dt):
         # If we didn't find intercepts then fallback to uing least squares. I don't think
         # this can really happen but I'm being paranoid
         if not left_async_shldr_found or not right_async_shldr_found:
-            elas, res, K, resid = get_least_squares_preds(flow, pressure, vols)
-            return None, 1/elas, res, resid, 4
+            return None, 4
 
         # Importantly: The points on the pressure curve which are a maximum
         # orthogonal distance above these lines are identified as the
@@ -353,7 +357,7 @@ def perform_single_iter_reconstruction(flow, pressure, vols, dt):
             recon = np.array([recon, line]).max(axis=0)
 
     # We do step 7 throughout the code previously. no need to redo it.
-    return recon, None, None, None, 0
+    return recon, 0
 
 
 def preprocess_flow_pressure(flow, pressure, dt):
@@ -361,6 +365,42 @@ def preprocess_flow_pressure(flow, pressure, dt):
     vols = np.array([0] + [simps(flow[:i], dx=dt) for i in range(2, len(flow)+1)])
     pressure = np.array(pressure)
     return flow, pressure, vols
+
+
+def perform_iipr_pressure_reconstruction(flow, pressure, x0, peep, dt):
+    """
+    Perform IIPR pressure reconstruction on a waveform. Can be used with a variety of algorithms
+    such as PREDATOR or MIPR.
+
+    :param flow: array vals of flow measurements in L/s
+    :param pressure: array vals of pressure obs
+    :param x0: index where flow crosses 0
+    :param peep: positive end expiratory pressure
+    :param dt: time in between observations
+
+    :returns tuple: reconstructed pressure, code
+
+    See below for code explanations
+    """
+    max_iter = 10
+    flow, pressure, vols = preprocess_flow_pressure(flow, pressure, dt)
+
+    # perform first iter (steps 1-7)
+    recon, code = perform_single_iter_reconstruction(flow, pressure, vols, dt)
+    if code != 0:
+        return None, code
+
+    # step 8-9
+    iters = 1
+    while not is_fit(flow, recon, vols, dt) and iters < max_iter:
+        recon_copy = copy(recon)
+        recon, code = perform_single_iter_reconstruction(flow, recon, vols, dt)
+        # if the algo wasn't successful then just use the last successful
+        # reconstructed pressure curve
+        if code != 0:
+            return recon_copy, 5
+        iters += 1
+    return recon, 0
 
 
 def perform_iipr_algo(flow, pressure, x0, peep, dt):
@@ -381,22 +421,12 @@ def perform_iipr_algo(flow, pressure, x0, peep, dt):
            when performing step 4 of algorithm.
         5: Failed on step 9, so fallback to least squares for last found reconstruction
     """
-    max_iter = 10
-    flow, pressure, vols = preprocess_flow_pressure(flow, pressure, dt)
-
-    # perform first iter (steps 1-7)
-    recon, comp, res, residual, code = perform_single_iter_reconstruction(flow, pressure, vols, dt)
-    if code != 0:
-        return comp, res, residual, code
-
-    # step 8-9
-    iters = 1
-    while not is_fit(flow, recon, vols, dt) and iters < max_iter:
-        recon_copy = copy(recon)
-        recon, comp, res, residual, code = perform_single_iter_reconstruction(flow, recon, vols, dt)
-        if code != 0:
-            elas, res, K, residual = get_least_squares_preds(flow, recon_copy, vols)
-            return 1/elas, res, residual, 5
-        iters += 1
-    elas, res, _, residual = get_least_squares_preds(flow, recon, vols)
-    return 1/elas, res, residual, 0
+    # my first iteration of this function used the whole breath for insp least squares. I
+    # still wonder if this is a better way to go. We can probably test this.
+    recon, code = perform_iipr_pressure_reconstruction(flow, pressure, x0, peep, dt)
+    if code in [2, 3, 4]:
+        # just supply 0 as tvi because it doesnt matter for this func
+        plat, comp, resist, K, residual = inspiratory_least_squares(flow, pressure, x0, dt, peep, 0)
+    if code in [0, 5]:
+        plat, comp, resist, K, residual = inspiratory_least_squares(flow, recon, x0, dt, peep, 0)
+    return 1/elas, resist, resid, code
