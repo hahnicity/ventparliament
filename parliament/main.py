@@ -16,7 +16,7 @@ def main():
     all_patient_dirs = Path(args.data_path).glob('*')
     for dir_ in sorted(list(all_patient_dirs)):
         for file in dir_.glob('*.raw.npy'):
-            algo = 'iipr'
+            algo = 'iipredator'
             calcs = FileCalculations(str(file), [algo, 'insp_least_squares'], 9)
             calcs.analyze_file()
             preds = calcs.results[algo]

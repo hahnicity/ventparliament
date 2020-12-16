@@ -144,7 +144,7 @@ def find_intercepts(a, b):
     return True, intercepts
 
 
-def is_fit(flow, pressure, vols, dt):
+def is_fit(flow, pressure, vols, peep, dt):
     """
     Evaluate newly reconstructed pressure if it needs to be fit again (step 8).
 
@@ -156,8 +156,6 @@ def is_fit(flow, pressure, vols, dt):
         return False
     modeled_pressure, residual = get_predicted_pressure_waveform_with_shears(flow, pressure, vols, shear_left, shear_right)
     diff = abs(pressure[shear_left:shear_right+1] - modeled_pressure[shear_left:shear_right+1])
-
-    peep = np.mean(pressure[-5:])
     auc = simps(pressure[shear_left:shear_right+1] - peep)
 
     # If the pressure is above an auc threshold then return False
@@ -392,7 +390,7 @@ def perform_iipr_pressure_reconstruction(flow, pressure, x0, peep, dt):
 
     # step 8-9
     iters = 1
-    while not is_fit(flow, recon, vols, dt) and iters < max_iter:
+    while not is_fit(flow, recon, vols, peep, dt) and iters < max_iter:
         recon_copy = copy(recon)
         recon, code = perform_single_iter_reconstruction(flow, recon, vols, dt)
         # if the algo wasn't successful then just use the last successful
@@ -429,4 +427,4 @@ def perform_iipr_algo(flow, pressure, x0, peep, dt):
         plat, comp, resist, K, residual = inspiratory_least_squares(flow, pressure, x0, dt, peep, 0)
     if code in [0, 5]:
         plat, comp, resist, K, residual = inspiratory_least_squares(flow, recon, x0, dt, peep, 0)
-    return 1/elas, resist, resid, code
+    return comp, resist, residual, code

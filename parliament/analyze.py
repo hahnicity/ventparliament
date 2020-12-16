@@ -6,7 +6,7 @@ from ventmap.constants import META_HEADER
 from ventmap.raw_utils import read_processed_file
 from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
-from parliament.iipr import perform_iipr_algo
+from parliament.iipr import perform_iipr_algo, perform_iipr_pressure_reconstruction
 from parliament.mipr import perform_mipr
 from parliament.other_calcs import (
     al_rawas_calcs,
@@ -49,6 +49,7 @@ class FileCalculations(object):
             "exp_least_squares": self.exp_least_squares,
             "howe_least_squares": self.howe_least_squares,
             'iipr': self.iipr,
+            'iipredator': self.iipredator,
             "insp_least_squares": self.insp_least_squares,
             "kannangara": self.kannangara,
             'mipr': self.mipr,
@@ -58,6 +59,8 @@ class FileCalculations(object):
             "vicario_nieap": self.vicario_nieap,
         }
         self.last_gold = np.nan if not recorded_compliance else recorded_compliance
+        self.iipred_reconstructed_pressures = {}
+        self.peeps = {}
         # Al-Rawas finds the expiratory time const via a regression on the
         # expiratory flow. If the residual is less than this value then
         # declare the exp const as unachievable.
@@ -111,9 +114,27 @@ class FileCalculations(object):
         )
         return compliance
 
+    def _perform_predator(self, pressures, breath_idx):
+        """
+        Convenience method for PREDATOR. Assumes you've already gathered your pressures.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        dt = breath['dt']
+        peep = self._get_median_peep(breath_idx)
+        plat, compliance, res, K, residual = perform_predator_algo(pressures, flow, bm.x0_index, dt, peep, bm.tvi/1000.0)
+        return compliance
+
     def _get_median_peep(self, breath_idx):
+        # implement caching because we can have multiple algos looking for same peep
+        if breath_idx in self.peeps:
+            return self.peeps[breath_idx]
+
         min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
-        return self.breath_metadata.iloc[min_idx:breath_idx+1].PEEP.median()
+        peep = self.breath_metadata.iloc[min_idx:breath_idx+1].PEEP.median()
+        self.peeps[breath_idx] = peep
+        return peep
 
     def al_rawas(self, breath_idx):
         breath = self.breath_data[breath_idx]
@@ -186,6 +207,39 @@ class FileCalculations(object):
         peep = self._get_median_peep(breath_idx)
         com, resist, residual, code = perform_iipr_algo(flow, pressure, bm.x0_index, peep, breath['dt'])
         return com
+
+    def iipredator(self, breath_idx):
+        """
+        Perform IIPR on a breath first, then perform PREDATOR. Follows Redmonds 2019 paper:
+
+        Evaluation of model-based methods in estimating respiratory mechanics in the presence of variable patient effort
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        # we do not have enough breaths previously to perform PREDATOR
+        if breath_idx < self.predator_n_breaths - 1:
+            return np.nan
+
+        min_idx = breath_idx-self.predator_n_breaths+1
+        max_idx = breath_idx
+
+        for i in range(min_idx, max_idx+1):
+            if i not in self.iipred_reconstructed_pressures:
+                tmp_breath = self.breath_data[i]
+                tmp_bm = self.breath_metadata.iloc[i]
+                tmp_flow = np.array(tmp_breath['flow']) / 60
+                peep = self._get_median_peep(i)
+                recon, code = perform_iipr_pressure_reconstruction(
+                    tmp_flow, tmp_breath['pressure'], tmp_bm.x0_index, peep, tmp_breath['dt']
+                )
+                if code in [0, 5]:
+                    self.iipred_reconstructed_pressures[i] = recon
+                else:
+                    self.iipred_reconstructed_pressures[i] = tmp_breath['pressure']
+
+        # +1 makes sure to include current breath
+        pressures = [self.iipred_reconstructed_pressures[i] for i in range(min_idx, max_idx+1)]
+        return self._perform_predator(pressures, breath_idx)
 
     def insp_least_squares(self, breath_idx):
         """
@@ -263,14 +317,11 @@ class FileCalculations(object):
         if breath_idx < self.predator_n_breaths - 1:
             return np.nan
         # +1 makes sure to include current breath
-        breaths = self.breath_data[breath_idx+1-self.predator_n_breaths:breath_idx+1]
-        pressure_data = [b['pressure'] for b in breaths]
-        flow_l_s = np.array(breaths[-1]['flow']) / 60
-        dt = breaths[-1]['dt']
-        bm = self.breath_metadata.iloc[breath_idx]
-        peep = self._get_median_peep(breath_idx)
-        plat, compliance, res, K, residual = perform_predator_algo(pressure_data, flow_l_s, bm.x0_index, dt, peep, bm.tvi/1000.0)
-        return compliance
+        #
+        # Don't save the predator reconstructed pressure to file because then predator would
+        # start becoming a bit of a self fulfilling prophecy/algo
+        pressures = [b['pressure'] for b in self.breath_data[breath_idx+1-self.predator_n_breaths:breath_idx+1]]
+        return self._perform_predator(pressures, breath_idx)
 
     def vicario_constrained(self, breath_idx):
         """
