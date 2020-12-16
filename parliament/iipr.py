@@ -42,7 +42,7 @@ def find_shoulders(flow, pressure, dt):
     # between the point of maximum pressure and the point of minimum flow
     try:
         shear_right_func = shear_transform(pressure[max_p_idx:min_f_idx+1], dt=dt, time_offset=max_p_idx)
-    except ValueError:
+    except (IndexError, ValueError):
         return None, None
     # just use first max val instead of the global max. It should be good enough
     for idx, val in enumerate(shear_right_func[::-1][1:]):
@@ -64,7 +64,10 @@ def get_least_squares_preds(flow, pressure, vols):
         Paw = E*V + R*V^dot + P0
     """
     a = np.array([vols, flow, [1] * len(pressure)]).transpose()
-    least_square_result = np.linalg.lstsq(a, pressure)
+    try:
+        least_square_result = np.linalg.lstsq(a, pressure)
+    except np.linalg.LinAlgError:
+        return np.nan, np.nan, np.nan, np.nan
     elastance, resist, K = least_square_result[0]
     try:
         residual = least_square_result[1][0]
@@ -310,11 +313,17 @@ def perform_single_iter_reconstruction(flow, pressure, vols, dt):
         if m > 0:
             continue
 
-        exp_grad = (pressure[shear_right + 2] - pressure[shear_right]) / 2
-        b = pressure[shear_right+2]
+        # shears can be slightly off. Might need to run this for shear_left as well.
+        if len(pressure)-1 == shear_right + 1:
+            right_grad_idx = shear_right + 1
+        else:
+            right_grad_idx = shear_right + 2
+
+        exp_grad = (pressure[right_grad_idx] - pressure[shear_right]) / 2
+        b = pressure[right_grad_idx]
         line = []
         # First we just construct the vertical part of the line
-        for i in range((shear_right+2)-left_async_cross+1):
+        for i in range((right_grad_idx)-left_async_cross+1):
             i = -i
             y = exp_grad * i + b
             if y < pressure[left_async_cross]:
@@ -324,7 +333,7 @@ def perform_single_iter_reconstruction(flow, pressure, vols, dt):
         line = np.concatenate([
             [IMPLAUSIBLE_PRESSURE] * left_async_cross,
             line,
-            [IMPLAUSIBLE_PRESSURE] * (len(pressure) - 1 - (shear_right + 2))
+            [IMPLAUSIBLE_PRESSURE] * (len(pressure) - 1 - (right_grad_idx))
         ])
         recon = np.array([recon, line]).max(axis=0)
 

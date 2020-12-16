@@ -48,6 +48,7 @@ class FileCalculations(object):
             "al_rawas": self.al_rawas,
             "exp_least_squares": self.exp_least_squares,
             "howe_least_squares": self.howe_least_squares,
+            'iimipr': self.iimipr,
             'iipr': self.iipr,
             'iipredator': self.iipredator,
             "insp_least_squares": self.insp_least_squares,
@@ -59,7 +60,7 @@ class FileCalculations(object):
             "vicario_nieap": self.vicario_nieap,
         }
         self.last_gold = np.nan if not recorded_compliance else recorded_compliance
-        self.iipred_reconstructed_pressures = {}
+        self.ii_reconstructed_pressures = {}
         self.peeps = {}
         # Al-Rawas finds the expiratory time const via a regression on the
         # expiratory flow. If the residual is less than this value then
@@ -194,12 +195,31 @@ class FileCalculations(object):
         """
         return self._perform_least_squares(breath_idx, howe_expiratory_least_squares)
 
+    def iimipr(self, breath_idx):
+        """
+        Run IIPR and then run MIPR on the reconstructed pressure.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        if breath_idx in self.ii_reconstructed_pressures:
+            pressure = self.ii_reconstructed_pressures[breath_idx]
+        else:
+            pressure = self.iipr_pressure_reconstruction(breath_idx)
+        flow = np.array(breath['flow']) / 60
+        peep = self._get_median_peep(breath_idx)
+        comp, resist, residual, code = perform_mipr(flow, pressure, bm.x0_index, peep, breath['dt'], self.mipr_iters)
+        return comp
+
     def iipr(self, breath_idx):
         """
         Perform IIPR for reconstructing pressure waveforms in volume control
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
+        # XXX if you want this to go faster on the full run you can probably saved cached reconstructions
+        # and then pull them when you're re-running on a new algo.
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata.iloc[breath_idx]
         flow = np.array(breath['flow']) / 60
@@ -224,22 +244,32 @@ class FileCalculations(object):
         max_idx = breath_idx
 
         for i in range(min_idx, max_idx+1):
-            if i not in self.iipred_reconstructed_pressures:
-                tmp_breath = self.breath_data[i]
-                tmp_bm = self.breath_metadata.iloc[i]
-                tmp_flow = np.array(tmp_breath['flow']) / 60
-                peep = self._get_median_peep(i)
-                recon, code = perform_iipr_pressure_reconstruction(
-                    tmp_flow, tmp_breath['pressure'], tmp_bm.x0_index, peep, tmp_breath['dt']
-                )
-                if code in [0, 5]:
-                    self.iipred_reconstructed_pressures[i] = recon
-                else:
-                    self.iipred_reconstructed_pressures[i] = tmp_breath['pressure']
+            if i not in self.ii_reconstructed_pressures:
+                self.iipr_pressure_reconstruction(i)
 
         # +1 makes sure to include current breath
-        pressures = [self.iipred_reconstructed_pressures[i] for i in range(min_idx, max_idx+1)]
+        pressures = [self.ii_reconstructed_pressures[i] for i in range(min_idx, max_idx+1)]
         return self._perform_predator(pressures, breath_idx)
+
+    def iipr_pressure_reconstruction(self, breath_idx):
+        """
+        Performs IIPR pressure reconstruction on a breath, caches it and returns the saved reconstruction
+        to the caller. If reconstruction fails, then the original breath pressure will be saved/returned
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata.iloc[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        peep = self._get_median_peep(breath_idx)
+        pressure = breath['pressure']
+        recon, code = perform_iipr_pressure_reconstruction(flow, pressure, bm.x0_index, peep, breath['dt'])
+        if code in [0, 5]:
+            self.ii_reconstructed_pressures[breath_idx] = recon
+            return recon
+        else:
+            self.ii_reconstructed_pressures[breath_idx] = pressure
+            return pressure
 
     def insp_least_squares(self, breath_idx):
         """
@@ -289,7 +319,7 @@ class FileCalculations(object):
         flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
         peep = self._get_median_peep(breath_idx)
-        comp, resist, residual, code = perform_mipr(flow, pressure, bm.x0_index, peep, self.mipr_iters)
+        comp, resist, residual, code = perform_mipr(flow, pressure, bm.x0_index, peep, breath['dt'], self.mipr_iters)
         return comp
 
     def polynomial(self, breath_idx):
@@ -327,7 +357,7 @@ class FileCalculations(object):
         """
         Implement the vicario constrained algorithm.
 
-        this function will sometimes fail to optimize at all, and elastance, resistance, p_mus are
+        This function will sometimes fail to optimize at all, and elastance, resistance, p_mus are
         just set to our initial guess. This situation has been improved by using a random initial
         guess but it does not solve the problem. A better solution in the future would be to
         have a mean/median elastance, residual, patient effort value and then just use that
@@ -410,6 +440,8 @@ class FileCalculations(object):
         #return self.results_analysis()
 
     # XXX need to redo this function
+    #
+    # XXX Actually moving this into a separate results module would be best
     def results_analysis(self):
         """
         Calculate Median Average Deviation (MAD) between gold standard and a calculation

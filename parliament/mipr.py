@@ -25,7 +25,7 @@ def get_predicted_pressure_waveform(flow, pressure, vols):
     return modeled_pressure, elastance, resist, residual
 
 
-def perform_mipr(flow, pressure, x0, peep, iters):
+def perform_mipr(flow, pressure, x0, peep, dt, iters):
     """
     Run MIPR algorithm that successively tries to reconstruct deformed pressure in volume control
     modes in the case of flow asynchrony.
@@ -34,6 +34,7 @@ def perform_mipr(flow, pressure, x0, peep, iters):
     :param pressure: array vals of pressure obs
     :param x0: index where flow crosses 0
     :param peep: positive end expiratory pressure
+    :param dt: time between observations on x axis
     :param iters: number iterations to run mipr algo
 
     :returns tuple: compliance, resistance, residual, response code
@@ -41,15 +42,21 @@ def perform_mipr(flow, pressure, x0, peep, iters):
     Response codes:
         0: Used algorithm and was successful
     """
-    flow, pressure, vols = preprocess_flow_pressure(flow, pressure)
+    flow, pressure, vols = preprocess_flow_pressure(flow, pressure, dt)
 
+    # I have seen that this can fail because least squares doesnt converge. Need to be able to
+    # handle this.
     elastance, resist, K, residual = get_least_squares_preds(flow, pressure, vols)
     peak_p = np.argmax(pressure)
-    # According to Chiew: Late asynchronies, detected when the peak pressure is not located
-    # at the end of a breathing cycle. However, no discrete implementation instructions are provided.
+    # According to Chiew: "Late asynchronies, detected when the peak pressure is not located
+    # at the end of a breathing cycle." This is a bit counter-intuitive, but normally the peak
+    # pressure is supposed to occur toward the end of inspiration. So if the peak pressure occurs
+    # early in inspiration then that means the patient is pulling hard toward the end of inspiration.
+    #
+    # Chiew doesnt provide discrete implementation instructions though.
     # So we divide the inspiratory section into half and then say if the peak pressure is not in
     # the last half then its a late asynchrony
-    if not x0/2 <= peak_p < x0:
+    if 0 <= peak_p < x0/2:
         recon_line = np.concatenate([
             pressure[:peak_p+1], [pressure[peak_p]] * (x0-peak_p-1), pressure[x0:]
         ])
