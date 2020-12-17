@@ -7,6 +7,7 @@ from ventmap.raw_utils import read_processed_file
 from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
 from parliament.iipr import perform_iipr_algo, perform_iipr_pressure_reconstruction
+from parliament.mccay.interface import McCayInterface
 from parliament.mipr import perform_mipr
 from parliament.other_calcs import (
     al_rawas_calcs,
@@ -25,7 +26,7 @@ from parliament.vicario_constrained import perform_constrained_optimization
 
 
 class FileCalculations(object):
-    def __init__(self, filename, algorithms_to_use, peeps_to_use, recorded_compliance=None, **kwargs):
+    def __init__(self, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, **kwargs):
         """
         Calculate lung compliance for an entire file using a variety of algorithms
 
@@ -34,12 +35,18 @@ class FileCalculations(object):
         be a list and consist of choices: 'vicario_co', 'kannangara', 'insp_least_squares',
         'brunner', 'vicario_nieap', ' al_rawas'
         :param peeps_to_use: Number of PEEPs to use when we calculate a median
-        :param recorded_compliance: Compliance pre-recorded for the file.
+        :param extra_breath_info: DataFrame of additional information like location of valid plat pressures for breath
+        :param recorded_compliance: Compliance pre-recorded for the file. Relevant for CVC data
         """
         self.algorithms_to_use = algorithms_to_use
+        self.extra_breath_info = extra_breath_info
+        self.filename = filename
+        if 'mccay' in self.algorithms_to_use:
+            # XXX not sure where these params come from. But I used them awhile back
+            self.mccay_interface = McCayInterface([.5, 15.], .01, True)
         self.peeps_to_use = peeps_to_use
         self.results = []
-        self.results_cols = ['gold_stnd_compliance'] + algorithms_to_use
+        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance'] + algorithms_to_use
         self.breath_data = list(read_processed_file(filename))
         self.breath_metadata = pd.DataFrame([
             get_production_breath_meta(breath) for breath in self.breath_data
@@ -53,6 +60,8 @@ class FileCalculations(object):
             'iipredator': self.iipredator,
             "insp_least_squares": self.insp_least_squares,
             "kannangara": self.kannangara,
+            # XXX mccay is currently working from a software perspective but the results are off.
+            'mccay': self.mccay,
             'mipr': self.mipr,
             'polynomial': self.polynomial,
             'predator': self.predator,
@@ -99,7 +108,6 @@ class FileCalculations(object):
         # because vicario constrained can sometimes fail miserably, filter vicario
         # breaths above this residual in vicario co
         self.vicario_co_residual = kwargs.get('vicario_co_residual', 200)
-        self.filename = filename
 
     def _perform_least_squares(self, breath_idx, func):
         """
@@ -308,6 +316,17 @@ class FileCalculations(object):
         tc_option = {25: 0, 50: 1, 75: 2, 100: 3}[self.lourens_tc_choice]
         return lourens_time_const(flow, tve, bm.x0_index, breath['dt'])[tc_option]
 
+    def mccay(self, breath_idx):
+        """
+        Perform McCay's method for finding compliance
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        peep = self._get_median_peep(breath_idx)
+        self.mccay_interface.analyze_breath(breath, peep)
+        return self.mccay_interface.results[breath['rel_bn']]['mean_compliance']
+
     def mipr(self, breath_idx):
         """
         Performs MIPR
@@ -402,75 +421,47 @@ class FileCalculations(object):
             return comp
         return np.nan
 
+    # XXX just send extra breath info here.
     def analyze_breath(self, breath_idx):
         """
         Analyze a single breath with all algorithms that we have specified to use. Save results
         to some object so we can analyze them later.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata.iloc[breath_idx]
+        rel_bn = breath['rel_bn']
         flow = np.array(breath['flow'])
         pressure = np.array(breath['pressure'])
         dt = breath['dt']
+        abs_bs = breath['abs_bs']
+        ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
         tvi = bm.tvi
         peep = self._get_median_peep(breath_idx)
-        found_plat, plat = calc_inspiratory_plateau(flow, pressure, dt)
-        if found_plat:
+        if ei_row.is_valid_plat == 1:
+            # we can relax the search criteria a bit for plats here because we already know
+            # where the proper plats are. Now the only thing we need is to calc the actual
+            # plat pressure
+            found_plat, plat = calc_inspiratory_plateau(flow, pressure, dt, min_time=0.4)
+            if not found_plat:
+                raise Exception(
+                    'this breath is supposed to be a plat, but no plat was found! Check ' +
+                    'params for calc_inspiratory_plateau.'
+                )
             gold = (tvi / 1000.0) / (plat - peep)
+            # XXX I dont know if I need this anymore, but I will keep it for now
             self.last_gold = gold
-            breath_results = [gold]
+            breath_results = [rel_bn, abs_bs, gold]
         else:
-            breath_results = [self.last_gold]
+            breath_results = [rel_bn, abs_bs, np.nan]
 
         for algo in self.algorithms_to_use:
             breath_results.append(self.algo_mapping[algo](breath_idx))
         return breath_results
 
     def analyze_file(self):
-        # XXX need to incorporate extra data to differentiate whats within 30 min and 1hr of
-        # the last plat
-        #
-        # XXX Also need to ensure that we're only using valid plats as well, and not any
-        # plat possible
         for idx in range(len(self.breath_data)):
             breath_results = self.analyze_breath(idx)
             self.results.append(breath_results)
         self.results = pd.DataFrame(self.results, columns=self.results_cols)
-        # XXX need to fix this so its compatible for use with a dataframe
-        #return self.results_analysis()
-
-    # XXX need to redo this function
-    #
-    # XXX Actually moving this into a separate results module would be best
-    def results_analysis(self):
-        """
-        Calculate Median Average Deviation (MAD) between gold standard and a calculation
-        and the MAD within a calculation
-        """
-        # should be {algo: [mad gld stnd, mad inter, breaths, mean_gld, [val1, val2, ...], [gld1, gld2, ...]], ...}
-        analysis = {val: [0, 0, 0, 0, [], []] for val in self.algorithms_to_use}
-        for bn in self.results:
-            gld = self.results[bn]['gold_stnd_compliance']
-            if gld is np.nan:
-                continue
-            for algo in self.algorithms_to_use:
-                val = self.results[bn][algo]
-                if val is np.nan:
-                    continue
-                analysis[algo][2] += 1
-                analysis[algo][-2].append(val)
-                analysis[algo][-1].append(gld)
-
-        for algo in self.algorithms_to_use:
-            vals = np.array(analysis[algo][-2])
-            glds = np.array(analysis[algo][-1])
-            median_val = np.median(vals)
-            inter_mad = np.median(np.abs(vals - median_val))
-            gld_mad = np.median(np.abs(vals - glds))
-            analysis[algo][0] = gld_mad
-            analysis[algo][1] = inter_mad
-            analysis[algo][3] = np.mean(glds)
-            # delete intermediate data for algo values and gold calcs
-            del analysis[algo][-1]
-            del analysis[algo][-1]
-        return analysis

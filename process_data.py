@@ -65,24 +65,26 @@ class Processing(object):
                     elif is_plat and not self.check_is_qi_cohort_plat(rows, dt) and br['rel_bn'] in rows.validated_rel_bn.values:
                         plats.append((f, br['rel_bn'], dt))
 
-        br_to_save = {}
+        br_to_save = {f: [] for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv')))}
+        for f, bn, plat_time in plats:
+            br_to_save[f].append((bn, True))
+
         for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv'))):
-            br_to_save[f] = []
             with open(str(f), encoding='ascii', errors='ignore') as desc:
                 gen = extract_raw(desc, False)
 
                 for br in gen:
                     dt = pd.to_datetime(br['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
-                    for f_name, bn, plat_time in plats:
-                        if str(f_name) == str(f) and bn == br['rel_bn']:
-                            # the True means that its a valid plat
-                            br_to_save[f_name].append((bn, True))
-                            break
+                    for _, __, plat_time in plats:
+
+                        if (f, br['rel_bn'], dt) in plats:
+                            continue
                         elif plat_time - pd.Timedelta(hours=0.5) < dt < plat_time + pd.Timedelta(hours=0.5):
                             br_to_save[f].append((br['rel_bn'], False))
                             break
 
         for f, vals in br_to_save.items():
+            vals = sorted(vals, key=lambda x: x[0])
             with open(str(f), encoding='ascii', errors='ignore') as desc:
                 extra_br_metadata = np.array(vals)
                 output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', ''))
@@ -105,7 +107,7 @@ def main():
     parser.add_argument('-rdp', '--raw-dataset-path', default='dataset/raw_data')
     parser.add_argument('-pdp', '--processed-dataset-path', default='dataset/processed_data')
     parser.add_argument('--flow-bound', type=float, default=0.2, help='flow bound for plat pressures')
-    parser.add_argument('--min-plat-time', type=float, default=0.5, help='minimum amount of time a plat must occur for')
+    parser.add_argument('--min-plat-time', type=float, default=0.4, help='minimum amount of time a plat must occur for')
     args = parser.parse_args()
 
     proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path)
