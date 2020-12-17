@@ -20,74 +20,83 @@ class Processing(object):
         self.raw_data_dir = Path(raw_data_dir)
         self.processed_data_dir = Path(processed_data_dir)
         self.cohort = pd.read_csv(cohort_filepath)
+        # very generous error margin
+        self.plat_wiggle_time = pd.Timedelta(hours=0.5)
 
-    def iterate_on_pt(self, row, min_time, flow_bound):
+    def check_is_qi_cohort_plat(self, rows, plat_time):
+        for i, row in rows.iterrows():
+            approx_time = pd.to_datetime(row['approx_plat_time'])
+            if row['is_qi_cohort_plat'] == 'y' and approx_time - self.plat_wiggle_time <= plat_time <= approx_time + self.plat_wiggle_time:
+                return True
+        else:
+            return False
+
+    def iterate_on_pt(self, rows, min_plat_time, flow_bound):
+        """
+        Iterate over all transferred raw patient files, and only keep breaths within
+        the time window of information that we desire. Ensure we preprocess and save
+        all necessary data for future use in analysis.
+        """
         # alright the additional information i want to include is:
         #
         # rel_bn: relative breath num
         # is_valid_plat: true/false
-        # is_30_min_after_valid_plat: true/false
-        # is_1hr_after_valid_plat: true/false
-        for f in sorted(list(self.raw_data_dir.joinpath(row['patient_id']).glob('*.csv'))):
-            should_save = False
-            br_to_save = []
-            extra_br_metadata = []
+        plats = []
+        patient_id = rows.iloc[0]['patient_id']
+        for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv'))):
             # just start at the beginning of time for sanity purposes and saving extra if/then blocks
-            last_valid_plat = datetime.fromtimestamp(0)
             with open(str(f), encoding='ascii', errors='ignore') as desc:
-                # only want to pickle data that is a valid plat or up to an hour
-                # over a valid plat. Everything after that we can forget about. This
-                # will save us logic in future analysis steps
                 gen = extract_raw(desc, False)
                 for br in gen:
                     is_plat = check_if_plat_occurs(
                         br['flow'],
                         br['pressure'],
                         br['dt'],
-                        min_time=min_time,
+                        min_time=min_plat_time,
                         flow_bound=flow_bound
                     )
                     dt = pd.to_datetime(br['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
                     # here we have a hierarchy of plats. plats in the QI cohort will
                     # always be trusted, and plats outside the QI cohort must've had an
                     # additional clinician verification of authenticity.
-                    if is_plat and row['is_qi_cohort_plat'] == 'n':
-                        is_valid_plat = (row['validated_rel_bn'] == br['rel_bn'])
-                    elif is_plat and row['is_qi_cohort_plat'] == 'y':
-                        is_valid_plat = True
-                    else:
-                        is_valid_plat = False
+                    is_valid_plat = False
+                    if is_plat and self.check_is_qi_cohort_plat(rows, dt):
+                        plats.append((f, br['rel_bn'], dt))
+                    elif is_plat and not self.check_is_qi_cohort_plat(rows, dt) and br['rel_bn'] in rows.validated_rel_bn.values:
+                        plats.append((f, br['rel_bn'], dt))
 
-                    # determine whether we should change state of whether to save current breath
-                    # or not
-                    if is_valid_plat:
-                        should_save = True
-                        last_valid_plat = dt
-                    elif not is_valid_plat and dt - last_valid_plat >= pd.Timedelta(hours=1):
-                        should_save = False
+        br_to_save = {}
+        for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv'))):
+            br_to_save[f] = []
+            with open(str(f), encoding='ascii', errors='ignore') as desc:
+                gen = extract_raw(desc, False)
 
-                    if should_save:
-                        br_to_save.append(br['rel_bn'])
-                        extra_br_metadata.append([
-                            br['rel_bn'],
-                            is_valid_plat,
-                            dt - last_valid_plat < pd.Timedelta(hours=0.5),
-                            dt - last_valid_plat < pd.Timedelta(hours=1),
-                        ])
+                for br in gen:
+                    dt = pd.to_datetime(br['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+                    for f_name, bn, plat_time in plats:
+                        if str(f_name) == str(f) and bn == br['rel_bn']:
+                            # the True means that its a valid plat
+                            br_to_save[f_name].append((bn, True))
+                            break
+                        elif plat_time - pd.Timedelta(hours=0.5) < dt < plat_time + pd.Timedelta(hours=0.5):
+                            br_to_save[f].append((br['rel_bn'], False))
+                            break
 
-                desc.seek(0)
-                output_fname = self.processed_data_dir.joinpath(row['patient_id'], f.name.replace('.csv', ''))
+        for f, vals in br_to_save.items():
+            with open(str(f), encoding='ascii', errors='ignore') as desc:
+                extra_br_metadata = np.array(vals)
+                output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', ''))
                 if not output_fname.parent.exists():
                     output_fname.parent.mkdir()
 
-                if len(br_to_save) != 0:
-                    extra_output_fname = self.processed_data_dir.joinpath(row['patient_id'], f.name.replace('.csv', '.extra.npy'))
-                    process_breath_file(desc, False, str(output_fname), spec_rel_bns=br_to_save)
-                    np.save(str(extra_output_fname), extra_br_metadata)
+                if len(extra_br_metadata) != 0:
+                    extra_output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', '.extra.pkl'))
+                    process_breath_file(desc, False, str(output_fname), spec_rel_bns=extra_br_metadata[:, 0])
+                    pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat']).to_pickle(str(extra_output_fname))
 
-    def iter_raw_dir(self, min_time, flow_bound):
-        for i, row in self.cohort.iterrows():
-            self.iterate_on_pt(row, min_time, flow_bound)
+    def iter_raw_dir(self, min_plat_time, flow_bound):
+        for patient_id, rows in self.cohort.groupby('patient_id'):
+            self.iterate_on_pt(rows, min_plat_time, flow_bound)
 
 
 def main():
@@ -95,12 +104,12 @@ def main():
     parser.add_argument('-c', '--cohort', default='cohort.csv')
     parser.add_argument('-rdp', '--raw-dataset-path', default='dataset/raw_data')
     parser.add_argument('-pdp', '--processed-dataset-path', default='dataset/processed_data')
-    parser.add_argument('--flow-bound', type=float, default=0.2)
-    parser.add_argument('--min-time', type=float, default=0.5)
+    parser.add_argument('--flow-bound', type=float, default=0.2, help='flow bound for plat pressures')
+    parser.add_argument('--min-plat-time', type=float, default=0.5, help='minimum amount of time a plat must occur for')
     args = parser.parse_args()
 
     proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path)
-    proc.iter_raw_dir(args.min_time, args.flow_bound)
+    proc.iter_raw_dir(args.min_plat_time, args.flow_bound)
 
 
 if __name__ == '__main__':

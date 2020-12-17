@@ -25,9 +25,11 @@ def get_plat_data(output_base_dir, patient_id, plat_time, hostname, host_data_di
     plat_time = pd.to_datetime(plat_time)
     file_glob = "*{:04d}-{:02d}-{:02d}-{}-*"
     print('Get data for patient: {}, at plat time: {}'.format(patient_id, plat_time.strftime('%Y-%m-%d-%H-%M')))
-    # the -2/+1 is just there because at max, files operate in 2 hr increments
+    # the -3/+1 is just there because at max, files operate in 2 hr increments. -3 is there for a
+    # super rare corner case that half hour prior would be in a file marked 3 hours behind when
+    # the approximate plat time was.
     delta_time = plat_time + timedelta(hours=1)
-    hour_glob = "{{{}}}".format(",".join(["{:02d}".format(i) for i in range(plat_time.hour-2, delta_time.hour+1)]))
+    hour_glob = "{{{}}}".format(",".join(["{:02d}".format(i) for i in range(plat_time.hour-3, delta_time.hour+1)]))
     start_glob = file_glob.format(plat_time.year, plat_time.month, plat_time.day, hour_glob)
     glob_gather_files(out_dir, patient_id, start_glob, hostname, host_data_dir)
 
