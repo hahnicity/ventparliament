@@ -16,12 +16,15 @@ from ventmap.SAM import check_if_plat_occurs
 
 
 class Processing(object):
-    def __init__(self, cohort_filepath, raw_data_dir, processed_data_dir):
+    def __init__(self, cohort_filepath, raw_data_dir, processed_data_dir, min_plat_time, flow_bound, any_or_all):
         self.raw_data_dir = Path(raw_data_dir)
         self.processed_data_dir = Path(processed_data_dir)
         self.cohort = pd.read_csv(cohort_filepath)
         # very generous error margin
         self.plat_wiggle_time = pd.Timedelta(hours=0.5)
+        self.min_plat_time = min_plat_time
+        self.flow_bound = flow_bound
+        self.any_or_all = any_or_all
 
     def check_is_qi_cohort_plat(self, rows, plat_time):
         for i, row in rows.iterrows():
@@ -31,7 +34,7 @@ class Processing(object):
         else:
             return False
 
-    def iterate_on_pt(self, rows, min_plat_time, flow_bound):
+    def iterate_on_pt(self, rows):
         """
         Iterate over all transferred raw patient files, and only keep breaths within
         the time window of information that we desire. Ensure we preprocess and save
@@ -52,8 +55,9 @@ class Processing(object):
                         br['flow'],
                         br['pressure'],
                         br['dt'],
-                        min_time=min_plat_time,
-                        flow_bound=flow_bound
+                        min_time=self.min_plat_time,
+                        flow_bound=self.flow_bound,
+                        flow_bound_any_or_all=self.any_or_all,
                     )
                     dt = pd.to_datetime(br['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
                     # here we have a hierarchy of plats. plats in the QI cohort will
@@ -96,9 +100,10 @@ class Processing(object):
                     process_breath_file(desc, False, str(output_fname), spec_rel_bns=extra_br_metadata[:, 0])
                     pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat']).to_pickle(str(extra_output_fname))
 
-    def iter_raw_dir(self, min_plat_time, flow_bound):
+    def iter_raw_dir(self, only_patient):
         for patient_id, rows in self.cohort.groupby('patient_id'):
-            self.iterate_on_pt(rows, min_plat_time, flow_bound)
+            if only_patient and only_patient == patient_id:
+                self.iterate_on_pt(rows)
 
 
 def main():
@@ -108,10 +113,12 @@ def main():
     parser.add_argument('-pdp', '--processed-dataset-path', default='dataset/processed_data')
     parser.add_argument('--flow-bound', type=float, default=0.2, help='flow bound for plat pressures')
     parser.add_argument('--min-plat-time', type=float, default=0.4, help='minimum amount of time a plat must occur for')
+    parser.add_argument('--any-or-all', choices=['any', 'all'], defaults='any')
+    parser.add_argument('--only-patient', help='only run specific patient')
     args = parser.parse_args()
 
-    proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path)
-    proc.iter_raw_dir(args.min_plat_time, args.flow_bound)
+    proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path, args.min_plat_time, args.flow_bound, args.any_or_all)
+    proc.iter_raw_dir(args.only_patient)
 
 
 if __name__ == '__main__':
