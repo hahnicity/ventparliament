@@ -26,6 +26,20 @@ class Processing(object):
         self.flow_bound = flow_bound
         self.any_or_all = any_or_all
 
+    def add_ventmode_metadata(self, extra_br_metadata, ventmode_file, raw_file):
+        if not ventmode_file.exists():
+            raise Exception('ventmode file for {} doesnt exist'.format(raw_file.name))
+        vm = pd.read_csv(ventmode_file)
+        study_supported_modes = ['vc', 'pc', 'prvc']
+        saved_bns = extra_br_metadata[:, 0]
+        mode_df = vm[vm.bn.isin(saved_bns)]
+        if mode_df[study_supported_modes].sum().sum() != len(mode_df):
+            raise Exception('file {} has ventmodes that are not supported by this study'.format(raw_file.name))
+        mode_df['ventmode'] = ''
+        for mode in study_supported_modes:
+            mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
+        return np.append(extra_br_metadata, np.expand_dims(mode_df['ventmode'].values, axis=1), axis=1)
+
     def check_is_qi_cohort_plat(self, rows, plat_time):
         for i, row in rows.iterrows():
             approx_time = pd.to_datetime(row['approx_plat_time'])
@@ -89,20 +103,26 @@ class Processing(object):
 
         for f, vals in br_to_save.items():
             vals = sorted(vals, key=lambda x: x[0])
+            if len(vals) == 0:
+                continue
+
             with open(str(f), encoding='ascii', errors='ignore') as desc:
                 extra_br_metadata = np.array(vals)
+                ventmode_file = f.parent.joinpath('../../ventmodes/{}'.format(f.name.replace('.csv', '_1-ventmode-output.csv')))
+                extra_br_metadata = self.add_ventmode_metadata(extra_br_metadata, ventmode_file, f)
                 output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', ''))
                 if not output_fname.parent.exists():
                     output_fname.parent.mkdir()
 
-                if len(extra_br_metadata) != 0:
-                    extra_output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', '.extra.pkl'))
-                    process_breath_file(desc, False, str(output_fname), spec_rel_bns=extra_br_metadata[:, 0])
-                    pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat']).to_pickle(str(extra_output_fname))
+                extra_output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', '.extra.pkl'))
+                process_breath_file(desc, False, str(output_fname), spec_rel_bns=extra_br_metadata[:, 0])
+                pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat', 'ventmode']).to_pickle(str(extra_output_fname))
 
     def iter_raw_dir(self, only_patient):
         for patient_id, rows in self.cohort.groupby('patient_id'):
             if only_patient and only_patient == patient_id:
+                self.iterate_on_pt(rows)
+            elif not only_patient:
                 self.iterate_on_pt(rows)
 
 
@@ -113,7 +133,7 @@ def main():
     parser.add_argument('-pdp', '--processed-dataset-path', default='dataset/processed_data')
     parser.add_argument('--flow-bound', type=float, default=0.2, help='flow bound for plat pressures')
     parser.add_argument('--min-plat-time', type=float, default=0.4, help='minimum amount of time a plat must occur for')
-    parser.add_argument('--any-or-all', choices=['any', 'all'], defaults='any')
+    parser.add_argument('--any-or-all', choices=['any', 'all'], default='any')
     parser.add_argument('--only-patient', help='only run specific patient')
     args = parser.parse_args()
 

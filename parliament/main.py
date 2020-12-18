@@ -24,6 +24,7 @@ class ResultsContainer(object):
         # just add the is_valid_plat col for convenience
         dataframe['is_valid_plat'] = False
         dataframe.loc[~dataframe.gold_stnd_compliance.isna(), 'is_valid_plat'] = True
+        dataframe['gold_orig'] = dataframe['gold_stnd_compliance']
         self.all_results.append(dataframe)
 
     def analyze_by_patient(self, patient):
@@ -96,30 +97,34 @@ def main():
 
     for dir_ in sorted(list(all_patient_dirs)):
         patient_id = dir_.name
-        # XXX debug just keep this line around in case a patient is failing for now
-        if '0210RPI' not in str(dir_):
-            continue
-        # XXX debug
         for file in dir_.glob('*.raw.npy'):
+            print(file)
+            # XXX debug just keep this line around in case a patient is failing for now
+            if '0210RPI0520160409-rpi5-2016-04-09-15-50-37' not in str(file):
+                continue
+            # XXX debug
             extra = pd.read_pickle(str(file).replace('raw.npy', 'extra.pkl'))
             print('run file {}'.format(str(file)))
-            calcs = FileCalculations(str(file), [algo, baseline], 9, extra)
+            calcs = FileCalculations(str(file), 'all', 9, extra)
             calcs.analyze_file()
             results.add_results_df(patient_id, calcs.results)
-        results.collate_data()
+    results.collate_data()
+    algos_used = set(results.all_results.columns).difference(set([
+        'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'patient_id', 'is_valid_plat', 'gold_orig'
+    ]))
 
-        # XXX debug
-        import IPython; IPython.embed()
-
-        import matplotlib.pyplot as plt
+    # XXX debug
+    import IPython; IPython.embed()
+    import matplotlib.pyplot as plt
+    patient_results = results.all_results
+    for algo in algos_used:
         preds = patient_results[algo]
-        gt = patient_results['gold_stnd_compliance']
         plt.plot(preds, label=algo)
-        plt.plot(patient_results[baseline], label=baseline)
-        plt.plot(gt, label='gt')
-        plt.legend()
-        plt.show()
-        plt.close()
+    gt = patient_results['gold_stnd_compliance']
+    plt.plot(gt, label='gt')
+    plt.legend()
+    plt.show()
+    plt.close()
 
 if __name__ == '__main__':
     main()

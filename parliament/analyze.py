@@ -31,26 +31,14 @@ class FileCalculations(object):
         Calculate lung compliance for an entire file using a variety of algorithms
 
         :param filename: filename to analyze
-        :param algorithms_to_use: Algorithms you want to include in your analysis. Should
+        :param algorithms_to_use: Algorithms you want to include in your analysis. To use all of
+        the available algos specific 'all'. To use specific ones, this argument should
         be a list and consist of choices: 'vicario_co', 'kannangara', 'insp_least_squares',
         'brunner', 'vicario_nieap', ' al_rawas'
         :param peeps_to_use: Number of PEEPs to use when we calculate a median
         :param extra_breath_info: DataFrame of additional information like location of valid plat pressures for breath
         :param recorded_compliance: Compliance pre-recorded for the file. Relevant for CVC data
         """
-        self.algorithms_to_use = algorithms_to_use
-        self.extra_breath_info = extra_breath_info
-        self.filename = filename
-        if 'mccay' in self.algorithms_to_use:
-            # XXX not sure where these params come from. But I used them awhile back
-            self.mccay_interface = McCayInterface([.5, 15.], .01, True)
-        self.peeps_to_use = peeps_to_use
-        self.results = []
-        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance'] + algorithms_to_use
-        self.breath_data = list(read_processed_file(filename))
-        self.breath_metadata = pd.DataFrame([
-            get_production_breath_meta(breath) for breath in self.breath_data
-        ], columns=META_HEADER)
         self.algo_mapping = {
             "al_rawas": self.al_rawas,
             "exp_least_squares": self.exp_least_squares,
@@ -61,14 +49,32 @@ class FileCalculations(object):
             "insp_least_squares": self.insp_least_squares,
             "kannangara": self.kannangara,
             # XXX mccay is currently working from a software perspective but the results are off.
-            'mccay': self.mccay,
+            #'mccay': self.mccay,
             'mipr': self.mipr,
             'polynomial': self.polynomial,
             'predator': self.predator,
             "vicario_co": self.vicario_constrained,
             "vicario_nieap": self.vicario_nieap,
         }
-        self.last_gold = np.nan if not recorded_compliance else recorded_compliance
+        if algorithms_to_use == 'all':
+            self.algorithms_to_use = list(self.algo_mapping.keys())
+        elif not isinstance(algorithms_to_use, list):
+            raise Exception('algorithms_to_use var must either be a list of algos to use or "all"')
+        self.algos_unavailable_for_pc_prvc = ['iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'vicario_co']
+        self.algos_unavailable_for_vc = ['kannangara']
+        self.extra_breath_info = extra_breath_info
+        self.filename = filename
+        if 'mccay' in self.algorithms_to_use:
+            # XXX not sure where these params come from. But I used them awhile back
+            self.mccay_interface = McCayInterface([.5, 15.], .01, True)
+        self.peeps_to_use = peeps_to_use
+        self.results = []
+        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance'] + self.algorithms_to_use
+        self.breath_data = list(read_processed_file(filename))
+        self.breath_metadata = pd.DataFrame([
+            get_production_breath_meta(breath) for breath in self.breath_data
+        ], columns=META_HEADER)
+        self.recorded_gold = np.nan if not recorded_compliance else recorded_compliance
         self.ii_reconstructed_pressures = {}
         self.peeps = {}
         # Al-Rawas finds the expiratory time const via a regression on the
@@ -389,13 +395,14 @@ class FileCalculations(object):
         """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata.iloc[breath_idx]
-        flow = breath['flow']
+        flow = np.array(breath['flow'])
+        pressure = np.array(breath['pressure'])
         dt = breath['dt']
         # need to divide by 60 here because we are expressing dx in terms of seconds. If we
         # didnt want to divide by 60 then we would need to express dx in terms of minutes
         vols = np.array([0] + [simps(flow[:i]/60, dx=dt) for i in range(2, len(flow)+1)])
         elas, res, p_mus, pao_preds, residual = perform_constrained_optimization(
-            flow, vols, breath['pressure'], bm.x0_index, self.vicario_co_m_idx
+            flow, vols, pressure, bm.x0_index, self.vicario_co_m_idx
         )
         if residual > self.vicario_co_residual:
             return np.nan
@@ -439,24 +446,29 @@ class FileCalculations(object):
         ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
         tvi = bm.tvi
         peep = self._get_median_peep(breath_idx)
+        ventmode = ei_row.ventmode
         if ei_row.is_valid_plat == 1:
             # we can relax the search criteria a bit for plats here because we already know
             # where the proper plats are. Now the only thing we need is to calc the actual
             # plat pressure
-            found_plat, plat = calc_inspiratory_plateau(flow, pressure, dt, min_time=0.4)
+            found_plat, plat = calc_inspiratory_plateau(flow, pressure, dt, min_time=0.4, flow_bound_any_or_all='all')
             if not found_plat:
                 raise Exception(
                     'this breath is supposed to be a plat, but no plat was found! Check ' +
                     'params for calc_inspiratory_plateau.'
                 )
             gold = (tvi / 1000.0) / (plat - peep)
-            # XXX I dont know if I need this anymore, but I will keep it for now
-            self.last_gold = gold
             breath_results = [rel_bn, abs_bs, gold]
         else:
-            breath_results = [rel_bn, abs_bs, np.nan]
+            breath_results = [rel_bn, abs_bs, self.recorded_gold]
 
         for algo in self.algorithms_to_use:
+            if ventmode in ['pc', 'prvc'] and algo in self.algos_unavailable_for_pc_prvc:
+                breath_results.append(np.nan)
+                continue
+            elif ventmode == 'vc' and algo in self.algos_unavailable_for_vc:
+                breath_results.append(np.nan)
+                continue
             breath_results.append(self.algo_mapping[algo](breath_idx))
         return breath_results
 
