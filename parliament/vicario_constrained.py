@@ -101,8 +101,6 @@ def _setup_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max, r_mi
     return obj, initial_guess, bounds, ieq_con, eq_con
 
 
-
-
 def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, e_max=100, e_min=0, p_min=-15, p_max=20, initial_guess=None):
     """
     :param flow: numpy array. Units denoted in L/min like vent returns
@@ -120,6 +118,8 @@ def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100,
                   points m between 0 and x0. Then you can determine which value m gives you the
                   lowest residual and then use that value for you final result.
     """
+    # XXX maybe I'm using the wrong units for this eq. because constrained optim is pretty
+    # consistently giving bad results
     obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess
     )

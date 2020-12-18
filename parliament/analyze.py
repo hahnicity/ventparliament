@@ -13,6 +13,7 @@ from parliament.other_calcs import (
     al_rawas_calcs,
     al_rawas_expiratory_const,
     brunner,
+    calc_volumes,
     expiratory_least_squares,
     howe_expiratory_least_squares,
     inspiratory_least_squares,
@@ -20,7 +21,7 @@ from parliament.other_calcs import (
     vicario_nieap
 )
 from parliament.polynomial_model import perform_polynomial_model
-from parliament.predator import perform_predator_algo
+from parliament.predator import perform_pressure_reconstruction as predator_reconstruction
 from parliament.pressure_ctrl_correction import perform_algo as kannangara
 from parliament.vicario_constrained import perform_constrained_optimization
 
@@ -60,6 +61,8 @@ class FileCalculations(object):
             self.algorithms_to_use = list(self.algo_mapping.keys())
         elif not isinstance(algorithms_to_use, list):
             raise Exception('algorithms_to_use var must either be a list of algos to use or "all"')
+        else:
+            self.algorithms_to_use = algorithms_to_use
         self.algos_unavailable_for_pc_prvc = ['iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'vicario_co']
         self.algos_unavailable_for_vc = ['kannangara']
         self.extra_breath_info = extra_breath_info
@@ -75,7 +78,18 @@ class FileCalculations(object):
             get_production_breath_meta(breath) for breath in self.breath_data
         ], columns=META_HEADER)
         self.recorded_gold = np.nan if not recorded_compliance else recorded_compliance
+        # XXX want to make this into a dict eventually
+        self.reconstruction_methods = {
+            'iipr',
+            'kannangara',
+            'mipr',
+            'predator',
+        }
+        self.non_reconstruction_methods = set(self.algo_mapping.keys()).difference(self.reconstruction_methods)
         self.ii_reconstructed_pressures = {}
+        self.kan_reconstructed_flows = {}
+        self.mipr_reconstructed_pressures = {}
+        self.predator_reconstructed_pressures = {}
         self.peeps = {}
         # Al-Rawas finds the expiratory time const via a regression on the
         # expiratory flow. If the residual is less than this value then
@@ -129,17 +143,19 @@ class FileCalculations(object):
         )
         return compliance
 
-    def _perform_predator(self, pressures, breath_idx):
+    def _perform_predator(self, breath_idx, reconstructed_pressure):
         """
-        Convenience method for PREDATOR. Assumes you've already gathered your pressures.
+        Convenience method for PREDATOR. Assumes you've already reconstructed your pressure.
         """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata.iloc[breath_idx]
         flow = np.array(breath['flow']) / 60
         dt = breath['dt']
         peep = self._get_median_peep(breath_idx)
-        plat, compliance, res, K, residual = perform_predator_algo(pressures, flow, bm.x0_index, dt, peep, bm.tvi/1000.0)
-        return compliance
+        plat, comp, res, K, resid = inspiratory_least_squares(
+            flow, reconstructed_pressure, bm.x0_index, dt, peep, bm.tvi
+        )
+        return comp
 
     def _get_median_peep(self, breath_idx):
         # implement caching because we can have multiple algos looking for same peep
@@ -263,7 +279,8 @@ class FileCalculations(object):
 
         # +1 makes sure to include current breath
         pressures = [self.ii_reconstructed_pressures[i] for i in range(min_idx, max_idx+1)]
-        return self._perform_predator(pressures, breath_idx)
+        recon = predator_reconstruction(pressures)
+        return self._perform_predator(breath_idx, recon)
 
     def iipr_pressure_reconstruction(self, breath_idx):
         """
@@ -303,11 +320,9 @@ class FileCalculations(object):
         bm = self.breath_metadata.iloc[breath_idx]
         flow = breath['flow']
         peep = self._get_median_peep(breath_idx)
-        sols = kannangara(flow, breath['pressure'], bm.x0_index, self.kannangara_thresh)
+        sols = kannangara(flow, breath['pressure'], bm.x0_index, peep, self.kannangara_thresh)
         # return compliance only
-        if sols[0]:
-            return sols[0]
-        return np.nan
+        return sols[0]
 
     def lourens_tau(self, breath_idx):
         """
@@ -368,15 +383,21 @@ class FileCalculations(object):
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
-        # we do not have enough breaths previously to perform PREDATOR
         if breath_idx < self.predator_n_breaths - 1:
             return np.nan
+        recon = self.predator_pressure_reconstruction(breath_idx)
+        return self._perform_predator(breath_idx, recon)
+
+    def predator_pressure_reconstruction(self, breath_idx):
+        # we do not have enough breaths previously to perform PREDATOR
+        if breath_idx in self.predator_reconstructed_pressures:
+            return self.predator_reconstructed_pressures[breath_idx]
         # +1 makes sure to include current breath
-        #
-        # Don't save the predator reconstructed pressure to file because then predator would
-        # start becoming a bit of a self fulfilling prophecy/algo
         pressures = [b['pressure'] for b in self.breath_data[breath_idx+1-self.predator_n_breaths:breath_idx+1]]
-        return self._perform_predator(pressures, breath_idx)
+        breath = self.breath_data[breath_idx]
+        recon = predator_reconstruction(pressures)
+        self.predator_reconstructed_pressures[breath_idx] = recon
+        return recon
 
     def vicario_constrained(self, breath_idx):
         """
@@ -400,7 +421,7 @@ class FileCalculations(object):
         dt = breath['dt']
         # need to divide by 60 here because we are expressing dx in terms of seconds. If we
         # didnt want to divide by 60 then we would need to express dx in terms of minutes
-        vols = np.array([0] + [simps(flow[:i]/60, dx=dt) for i in range(2, len(flow)+1)])
+        vols = calc_volumes(np.array(flow)/60, dt)
         elas, res, p_mus, pao_preds, residual = perform_constrained_optimization(
             flow, vols, pressure, bm.x0_index, self.vicario_co_m_idx
         )
@@ -428,7 +449,6 @@ class FileCalculations(object):
             return comp
         return np.nan
 
-    # XXX just send extra breath info here.
     def analyze_breath(self, breath_idx):
         """
         Analyze a single breath with all algorithms that we have specified to use. Save results

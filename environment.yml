@@ -13,7 +13,7 @@ dependencies:
   - jupyter
   - pip
   - pip:
-    - pathlib
+    - statsmodels
     - ventmap>=1.4.7
 channels:
   - conda-forge

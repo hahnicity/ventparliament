@@ -21,17 +21,11 @@ from parliament.other_calcs import inspiratory_least_squares
 
 
 def perform_pressure_reconstruction(pressure_waveforms):
-    reconstructed = []
     longest = max([len(wave) for wave in pressure_waveforms])
-    for i in range(longest):
-        vals = []
-        for wave in pressure_waveforms:
-            try:
-                vals.append(wave[i])
-            except IndexError:
-                continue
-        reconstructed.append(np.percentile(vals, 90))
-    return reconstructed
+    reconstructed = []
+    for arr in pressure_waveforms:
+        reconstructed.append(list(arr) + ([np.nan] * (longest-len(arr))))
+    return np.percentile(reconstructed, 90, axis=0)
 
 
 def perform_predator_algo(pressure_waveforms, flow, x0_index, dt, peep, tvi):
@@ -50,4 +44,5 @@ def perform_predator_algo(pressure_waveforms, flow, x0_index, dt, peep, tvi):
     # pressure in prior breaths.
     reconstructed_pressure = perform_pressure_reconstruction(pressure_waveforms)
     reconstructed_pressure = reconstructed_pressure[:len(flow)]
-    return inspiratory_least_squares(flow, reconstructed_pressure, x0_index, dt, peep, tvi)
+    plat, comp, res, K, resid = inspiratory_least_squares(flow, reconstructed_pressure, x0_index, dt, peep, tvi)
+    return plat, comp, res, K, resid, reconstructed_pressure

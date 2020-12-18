@@ -10,7 +10,7 @@ from copy import copy
 import numpy as np
 from scipy.integrate import simps
 
-from parliament.other_calcs import inspiratory_least_squares
+from parliament.other_calcs import calc_volumes, inspiratory_least_squares
 
 IMPLAUSIBLE_PRESSURE = -1000
 
@@ -368,9 +368,9 @@ def perform_single_iter_reconstruction(flow, pressure, vols, dt):
 
 
 def preprocess_flow_pressure(flow, pressure, dt):
-    flow = np.array(flow)
-    vols = np.array([0] + [simps(flow[:i], dx=dt) for i in range(2, len(flow)+1)])
+    vols = calc_volumes(flow, dt)
     pressure = np.array(pressure)
+    flow = np.array(flow)
     return flow, pressure, vols
 
 

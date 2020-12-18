@@ -5,6 +5,40 @@ from scipy.integrate import simps
 from scipy.stats import linregress
 
 
+def calc_volumes(flow, dt):
+    """
+    Calculate volume for flow wave using simpsons rule. Here we use a streaming version of simpsons
+    that is faster to compute than just calling the simps method for each observation in the
+    flow array
+
+    :param flow: array vals of flow measurements in L/s
+    :param dt: time delta between obs
+    """
+    vols = np.zeros(len(flow))
+    # go over odds first
+    if len(flow) >= 4:
+        vols[1] = (flow[0] + flow[1]) / 2 * dt
+        vols[2] = (dt / 3) * (flow[0] + 4*flow[1] + flow[2])
+        evens = dt/3 * (flow[1] + 4*flow[2] + flow[3])
+        vols[3] = ((vols[2] + (flow[2] + flow[3])/2*dt) + (evens + vols[1])) / 2
+    else:
+        raise Exception('this isnt supposed to happen. but it did... im too tired to figure this out rn')
+
+    # fill in odd vals first
+    for i in range(4, len(flow), 2):
+        vols[i] = (vols[i-2]) + (flow[i-2] + 4*flow[i-1] + flow[i]) * (dt/3)
+
+    # then fill evens.
+    for i in range(5, len(flow), 2):
+        # this would be the first trap plus n-1 obs of simpsons
+        evens = evens + (flow[i-2] + 4*flow[i-1] + flow[i]) * (dt/3)
+        first = evens + (flow[0]+flow[1])/2*dt
+        # this is the last trap plus first n-1 obs of simpsons
+        second = vols[i-1] + (flow[i-1] + flow[i]) / 2 * dt
+        vols[i] = (first + second) / 2
+    return vols
+
+
 def al_rawas_expiratory_const(flow, x0_index, dt, tvi, linregress_tol):
     """
     Calculate the Al Rawas time constant (tau_E)
@@ -24,7 +58,11 @@ def al_rawas_expiratory_const(flow, x0_index, dt, tvi, linregress_tol):
     flow = flow[x0_index:]
     start_idx = int(.1 / dt)
     end_idx = int(.5 / dt)
-    vols = [tvi + simps(flow[:i], dx=dt) for i in range(2,len(flow[:end_idx+1]))]
+    # XXX I dunno why we're cutting off the 0 here, but this is what I wrote originally
+    #
+    # XXX this is weird...originally we cut off volumes at the end index, but then we
+    # cut them off again at the end index. I dont get this.
+    vols = tvi + calc_volumes(flow, dt)[:end_idx]
     x = [abs(val) for val in flow[start_idx:end_idx]]
     regress = linregress(x, vols[start_idx-1:end_idx-1])
     if regress.rvalue < linregress_tol:
@@ -55,7 +93,7 @@ def al_rawas_calcs(flow, pressure, x0_index, dt, pip, peep, tvi, compliance_idx,
     if len(flow[:x0_index-1]) <= compliance_idx:
         return np.nan, np.nan, np.nan, np.nan
     tau = al_rawas_expiratory_const(flow, x0_index, dt, tvi, linregress_tol)
-    vols = [0] + [simps(flow[0:i], dx=dt) for i in range(2, len(flow)+1)]
+    vols = calc_volumes(flow, dt)
     compliance_curve = [
         (vol + tau * flow[i]) / (max(pressure[:i+1]) - peep)
         for i, vol in enumerate(vols[:x0_index-1])
@@ -134,7 +172,7 @@ def expiratory_least_squares(flow, pressure, x0_index, dt, peep, tvi):
     if x0_index > len(flow):
         return (np.nan, np.nan, np.nan, np.nan, np.nan)
 
-    vols = [0] + [simps(flow[:i], dx=dt) for i in range(2, len(flow)+1)]
+    vols = calc_volumes(flow, dt)
     vols = vols[x0_index-1:]
     flow = flow[x0_index-1:]
     pressure = pressure[x0_index-1:]
@@ -166,7 +204,7 @@ def howe_expiratory_least_squares(flow, pressure, x0_index, dt, peep, tvi):
         return (np.nan, np.nan, np.nan, np.nan, np.nan)
 
     start_idx = x0_index - 1
-    vols = [0] + [simps(flow[start_idx:i], dx=dt) for i in range(start_idx+2, len(flow)+1)]
+    vols = calc_volumes(flow, dt)[start_idx:]
     flow = flow[start_idx:]
     pressure = np.array(pressure[start_idx:])
     pressure = pressure - pressure[0]
@@ -197,7 +235,7 @@ def inspiratory_least_squares(flow, pressure, x0_index, dt, peep, tvi):
     :returns tuple: plateau pressure, compliance, resistance, K, residual
     """
     end_idx = x0_index if x0_index <= len(flow) else len(flow)
-    vols = [0] + [simps(flow[:i], dx=dt) for i in range(2, end_idx+1)]
+    vols = calc_volumes(flow, dt)[:end_idx]
     a = np.array([vols, flow[:end_idx], [1]*end_idx]).transpose()
     return perform_least_squares(a, pressure[:end_idx], tvi, peep)
 
@@ -225,7 +263,7 @@ def lourens_time_const(flow, tve, x0_index, dt):
 
     min_idx = np.argmin(flow)
     flow = np.abs(flow)
-    vols = [0] + [simps(flow[:i], dx=dt) for i in range(2, len(flow)+1)]
+    vols = calc_volumes(flow, dt)
 
     v25, v50, v75 = tve/4.0, tve/2.0, tve*(3/4.0)
     v25_idx, v50_idx, v75_idx, v100_idx = None, None, None, None
