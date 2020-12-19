@@ -86,6 +86,7 @@ def perform_algo(flow, pressure, x0, peep, auc_thresh, debug=False):
     modes for asynchronously breathing patients.
 
     :param flow: flow in L/min, the normal way we get it from the vent
+    :param vols: calculated volumes inspired over time
     :param pressure: pressure recordings
     :param x0: the point at which flow crosses 0
     :param peep: the PEEP set for the breath
@@ -121,7 +122,6 @@ def perform_algo(flow, pressure, x0, peep, auc_thresh, debug=False):
         return np.nan, np.nan, np.nan, 2
 
     # step 3 perform flow reconstruction
-    vols = np.array([0] + [simps(flow[:i], dx=dt) for i in range(2, len(flow)+1)])
     pred, comp, res, resid = get_predicted_flow_waveform(flow[shear_left:shear_right+1], pressure[shear_left:shear_right+1], peep, vols[shear_left:shear_right+1])
     pred = np.append([np.nan] * shear_left, pred)
     diff_pred_real = 0

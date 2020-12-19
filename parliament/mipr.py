@@ -7,7 +7,7 @@ airway pressure reconstruction."
 """
 import numpy as np
 
-from parliament.iipr import get_least_squares_preds, IMPLAUSIBLE_PRESSURE, preprocess_flow_pressure
+from parliament.iipr import get_least_squares_preds, IMPLAUSIBLE_PRESSURE
 
 
 def get_predicted_pressure_waveform(flow, pressure, vols):
@@ -25,12 +25,13 @@ def get_predicted_pressure_waveform(flow, pressure, vols):
     return modeled_pressure, elastance, resist, residual
 
 
-def perform_mipr(flow, pressure, x0, peep, dt, iters):
+def perform_mipr(flow, vols, pressure, x0, peep, dt, iters):
     """
     Run MIPR algorithm that successively tries to reconstruct deformed pressure in volume control
     modes in the case of flow asynchrony.
 
     :param flow: array vals of flow measurements in L/s
+    :param vols: breath volume in L per observation of the flow array
     :param pressure: array vals of pressure obs
     :param x0: index where flow crosses 0
     :param peep: positive end expiratory pressure
@@ -42,7 +43,7 @@ def perform_mipr(flow, pressure, x0, peep, dt, iters):
     Response codes:
         0: Used algorithm and was successful
     """
-    flow, pressure, vols = preprocess_flow_pressure(flow, pressure, dt)
+    flow, pressure = np.array(flow), np.array(pressure)
 
     # I have seen that this can fail because least squares doesnt converge. Need to be able to
     # handle this.

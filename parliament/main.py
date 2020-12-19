@@ -98,23 +98,19 @@ def main():
     for dir_ in sorted(list(all_patient_dirs)):
         patient_id = dir_.name
         for file in dir_.glob('*.raw.npy'):
-            print(file)
             # XXX debug just keep this line around in case a patient is failing for now
-            if '0210RPI0520160409-rpi5-2016-04-09-15-50-37' not in str(file):
+            if '0210RPI' not in str(file):
                 continue
             # XXX debug
             extra = pd.read_pickle(str(file).replace('raw.npy', 'extra.pkl'))
-            print('run file {}'.format(str(file)))
             calcs = FileCalculations(str(file), 'all', 9, extra)
             calcs.analyze_file()
             results.add_results_df(patient_id, calcs.results)
     results.collate_data()
-    algos_used = set(results.all_results.columns).difference(set([
-        'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'patient_id', 'is_valid_plat', 'gold_orig'
-    ]))
+    algos_used = set(results.all_results.columns).intersection(set(list(calcs.algo_mapping.keys())))
 
-    # XXX debug
-    import IPython; IPython.embed()
+#    # XXX debug
+    #import IPython; IPython.embed()
     import matplotlib.pyplot as plt
     patient_results = results.all_results
     for algo in algos_used:
@@ -125,6 +121,7 @@ def main():
     plt.legend()
     plt.show()
     plt.close()
+
 
 if __name__ == '__main__':
     main()

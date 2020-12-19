@@ -31,8 +31,8 @@ def get_predicted_pressure_waveform(flow, pressure, peep, x0, tvi, vols):
     :param tvi: TVi in L
     :param vols: calculated volumes inspired over time
     """
-    plat, comp, resist, K, residual = least_squares_method(flow, pressure, x0, 0.02, peep, tvi)
-    modeled_pressure = (1 / comp) * vols + resist * flow[:x0-1] + K
+    plat, comp, resist, K, residual = least_squares_method(flow, vols, pressure, x0, 0.02, peep, tvi)
+    modeled_pressure = (1 / comp) * vols[:x0-1] + resist * flow[:x0-1] + K
     return modeled_pressure, comp, resist, residual
 
 
@@ -105,13 +105,14 @@ def perform_least_squares_fit(flow, pressure, vols, peep, x0, ts, tf):
     return result
 
 
-def perform_polynomial_model(flow, pressure, x0, peep, tvi):
+def perform_polynomial_model(flow, vols, pressure, x0, peep, tvi):
     """
     Perform the Redmond algorithm for estimating patient effort using a polynomial
     eq. This algorithm has some drawbacks but it is a good proof of concept
     for estimating effort.
 
     :param flow: array vals of flow measurements in L/s
+    :param vols: calculated volumes inspired over time
     :param pressure: array vals of pressure obs
     :param peep: positive end expiratory pressure
     :param x0: index where flow crosses 0 and expiration starts
@@ -125,7 +126,6 @@ def perform_polynomial_model(flow, pressure, x0, peep, tvi):
     """
     flow = np.array(flow)
     pressure = np.array(pressure)
-    vols = np.array([0] + [simps(flow[:i], dx=0.02) for i in range(2, x0)])
     modeled_pressure, compliance, resistance, _ = get_predicted_pressure_waveform(flow, pressure, peep, x0, tvi, vols)
     ts, tf = find_ts_tf(pressure, modeled_pressure)
     # Perform least squares modeling
@@ -142,7 +142,7 @@ def perform_polynomial_model(flow, pressure, x0, peep, tvi):
         all_roots_real = True
 
     if not ((0 <= solns[0] <= 500) and (0 <= solns[1] <= 500) and solns[2] > 0 and all_roots_real):
-        _, comp, resist, K, residual = least_squares_method(flow, pressure, x0, 0.02, peep, tvi)
+        _, comp, resist, K, residual = least_squares_method(flow, vols, pressure, x0, 0.02, peep, tvi)
         return comp, resist, residual[0], 2
     else:
         return 1 / solns[0], solns[1], result[1][0], 0

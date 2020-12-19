@@ -367,19 +367,13 @@ def perform_single_iter_reconstruction(flow, pressure, vols, dt):
     return recon, 0
 
 
-def preprocess_flow_pressure(flow, pressure, dt):
-    vols = calc_volumes(flow, dt)
-    pressure = np.array(pressure)
-    flow = np.array(flow)
-    return flow, pressure, vols
-
-
-def perform_iipr_pressure_reconstruction(flow, pressure, x0, peep, dt):
+def perform_iipr_pressure_reconstruction(flow, vols, pressure, x0, peep, dt):
     """
     Perform IIPR pressure reconstruction on a waveform. Can be used with a variety of algorithms
     such as PREDATOR or MIPR.
 
     :param flow: array vals of flow measurements in L/s
+    :param vols: calculated volumes inspired over time in L.
     :param pressure: array vals of pressure obs
     :param x0: index where flow crosses 0
     :param peep: positive end expiratory pressure
@@ -390,7 +384,7 @@ def perform_iipr_pressure_reconstruction(flow, pressure, x0, peep, dt):
     See below for code explanations
     """
     max_iter = 10
-    flow, pressure, vols = preprocess_flow_pressure(flow, pressure, dt)
+    flow, pressure = np.array(flow), np.array(pressure)
 
     # perform first iter (steps 1-7)
     recon, code = perform_single_iter_reconstruction(flow, pressure, vols, dt)
@@ -410,9 +404,10 @@ def perform_iipr_pressure_reconstruction(flow, pressure, x0, peep, dt):
     return recon, 0
 
 
-def perform_iipr_algo(flow, pressure, x0, peep, dt):
+def perform_iipr_algo(flow, vols, pressure, x0, peep, dt):
     """
     :param flow: array vals of flow measurements in L/s
+    :param vols: calculated volumes inspired over time in L.
     :param pressure: array vals of pressure obs
     :param x0: index where flow crosses 0
     :param peep: positive end expiratory pressure
@@ -430,10 +425,10 @@ def perform_iipr_algo(flow, pressure, x0, peep, dt):
     """
     # my first iteration of this function used the whole breath for insp least squares. I
     # still wonder if this is a better way to go. We can probably test this.
-    recon, code = perform_iipr_pressure_reconstruction(flow, pressure, x0, peep, dt)
+    recon, code = perform_iipr_pressure_reconstruction(flow, vols, pressure, x0, peep, dt)
     if code in [2, 3, 4]:
         # just supply 0 as tvi because it doesnt matter for this func
-        plat, comp, resist, K, residual = inspiratory_least_squares(flow, pressure, x0, dt, peep, 0)
+        plat, comp, resist, K, residual = inspiratory_least_squares(flow, vols, pressure, x0, dt, peep, 0)
     if code in [0, 5]:
-        plat, comp, resist, K, residual = inspiratory_least_squares(flow, recon, x0, dt, peep, 0)
+        plat, comp, resist, K, residual = inspiratory_least_squares(flow, vols, recon, x0, dt, peep, 0)
     return comp, resist, residual, code
