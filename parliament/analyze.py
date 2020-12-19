@@ -21,7 +21,7 @@ from parliament.other_calcs import (
     vicario_nieap
 )
 from parliament.polynomial_model import perform_polynomial_model
-from parliament.predator import perform_pressure_reconstruction as predator_reconstruction
+from parliament.predator import max_pool_pressure_reconstruction, perform_pressure_reconstruction as predator_reconstruction
 from parliament.pressure_ctrl_correction import perform_algo as kannangara
 from parliament.vicario_constrained import perform_constrained_optimization
 
@@ -50,6 +50,7 @@ class FileCalculations(object):
             "kannangara": self.kannangara,
             # XXX mccay is currently working from a software perspective but the results are off.
             #'mccay': self.mccay,
+            'major': self.major,
             'mipr': self.mipr,
             'polynomial': self.polynomial,
             'predator': self.predator,
@@ -101,9 +102,9 @@ class FileCalculations(object):
         # Al-Rawas has another weird constant in his equation. This probably
         # varies from patient to patient in different circumstances and theres
         # probably no really good way of finding it besides iterating over all
-        # possible indices and finding what works best for a specific breath. For speed
-        # sake here, we just set it to a single number.
-        self.al_rawas_idx = kwargs.get('al_rawas_idx', 15)
+        # possible indices and finding what works best for a specific breath. So
+        # we just specify to use the median of the compliance curve
+        self.al_rawas_idx = kwargs.get('al_rawas_idx', 'median')
         # this is the number of iterations to run brunner's algo for
         self.brunner_iters = kwargs.get('brunner_iters', 2)
         # this is the auc threshold to determine if a breath is asynchronous or not
@@ -117,7 +118,8 @@ class FileCalculations(object):
         # should be looking to make our approximation of the pressure (or flow) curve
         self.predator_n_breaths = kwargs.get('predator_n_breaths', 5)
         # time const algo to use. by default we use al-rawas because its fiddly constant is
-        # relatively easy to pick. Brunner has a weird non-converging iters term, and lourens
+        # relatively easy to pick and just specifies a tolerance at which the time constant
+        # is not linear anymore. Brunner has a weird non-converging iters term, and lourens
         # you need to pick which time const you want to use, which can vary from patient to
         # patient and breath to breath.
         self.tc_algo = {
@@ -214,9 +216,7 @@ class FileCalculations(object):
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata.iloc[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
-        tvi = bm.tvi/1000.0
-        vols = self._calc_breath_volume(breath_idx)
-        return al_rawas_expiratory_const(flow_l_s, vols, bm.x0_index, self.dt, tvi, self.al_rawas_tol)
+        return al_rawas_expiratory_const(flow_l_s, bm.x0_index, self.dt, self.al_rawas_tol)
 
     def brunner(self, breath_idx):
         """
@@ -363,6 +363,19 @@ class FileCalculations(object):
         tc_option = {25: 0, 50: 1, 75: 2, 100: 3}[self.lourens_tc_choice]
         vols = self._calc_breath_volume(breath_idx)
         return lourens_time_const(flow, vols, tve, bm.x0_index, self.dt)[tc_option]
+
+    def major(self, breath_idx):
+        """
+        Perform the max pooling (Major's) method for pressure reconstruction. It's really just
+        PREDATOR underneath. Use the same number of breaths that we normally use in PREDATOR.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        if breath_idx < self.predator_n_breaths - 1:
+            return np.nan
+        pressures = [b['pressure'] for b in self.breath_data[breath_idx+1-self.predator_n_breaths:breath_idx+1]]
+        recon = max_pool_pressure_reconstruction(pressures)
+        return self._perform_predator(breath_idx, recon)
 
     def mccay(self, breath_idx):
         """

@@ -20,12 +20,28 @@ import numpy as np
 from parliament.other_calcs import inspiratory_least_squares
 
 
-def perform_pressure_reconstruction(pressure_waveforms):
+def _create_tmp_pressure_mat(pressure_waveforms):
     longest = max([len(wave) for wave in pressure_waveforms])
     reconstructed = []
     for arr in pressure_waveforms:
         reconstructed.append(list(arr) + ([np.nan] * (longest-len(arr))))
-    return np.percentile(reconstructed, 90, axis=0)
+    return reconstructed
+
+
+def max_pool_pressure_reconstruction(pressure_waveforms):
+    """
+    This performs pressure reconstruction as mentioned in:
+
+    Major et al, Respiratory mechanics assessment for reverse-triggered breathing
+    cycles using pressure reconstruction, 2016
+    """
+    reconstructed = _create_tmp_pressure_mat(pressure_waveforms)
+    return np.nanmax(reconstructed, axis=0)
+
+
+def perform_pressure_reconstruction(pressure_waveforms):
+    reconstructed = _create_tmp_pressure_mat(pressure_waveforms)
+    return np.nanpercentile(reconstructed, 90, axis=0)
 
 
 def perform_predator_algo(pressure_waveforms, flow, x0_index, dt, peep, tvi):

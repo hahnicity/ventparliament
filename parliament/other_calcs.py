@@ -39,7 +39,7 @@ def calc_volumes(flow, dt):
     return vols
 
 
-def al_rawas_expiratory_const(flow, vols, x0_index, dt, tvi, linregress_tol):
+def al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol):
     """
     Calculate the Al Rawas time constant (tau_E)
 
@@ -48,24 +48,24 @@ def al_rawas_expiratory_const(flow, vols, x0_index, dt, tvi, linregress_tol):
     and total resistance. Critical care. 2013 Feb 1;17(1):R23.
 
     :param flow: array vals of flow measurements in L/s
-    :param vols: breath volume in L per observation of the flow array
     :param x0_index: index where flow crosses 0
     :param dt: time delta between obs
-    :param tvi: TVi in L
     :param linregress_tol: tolerance for the residual on linear regression
     """
     if len(flow[x0_index:]) <= int(.5 / dt):
         return np.nan
-    flow = flow[x0_index:]
     start_idx = int(.1 / dt)
     end_idx = int(.5 / dt)
-    # XXX I dunno why we're cutting off the 0 here, but this is what I wrote originally
+    # its not totally clear what al-rawas meant in his paper that we must measure exhaled volume
+    # between 0.1 and 0.5 seconds. did this mean start doing point by point volume calcs from
+    # 0.1 or from start of exhale. For my purposes I start from beginning of exhale
     #
-    # XXX this is weird...originally we cut off volumes at the end index, but then we
-    # cut them off again at the end index. I dont get this.
-    vols = tvi + vols[:end_idx]
-    x = [abs(val) for val in flow[start_idx:end_idx]]
-    regress = linregress(x, vols[start_idx-1:end_idx-1])
+    # method deviates slightly from al-rawas in that the volumes we have are negative. This is
+    # necessary to maintain a positive slope while we just focus exclusively on tidal volume
+    # exhaled, and not the tidal volume exhaled plus any residual tvi.
+    vols = calc_volumes(flow[x0_index:x0_index+end_idx], dt)
+    x = np.abs(flow[x0_index+start_idx:x0_index+end_idx])
+    regress = linregress(x, vols[start_idx:])
     if regress.rvalue < linregress_tol:
         return np.nan
     return regress.slope
@@ -87,19 +87,27 @@ def al_rawas_calcs(flow, vols, pressure, x0_index, dt, pip, peep, tvi, complianc
     :param pip: peak insp pressure
     :param peep: positive end expiratory pressure
     :param tvi: TVi in L
-    :param compliance_idx: After computing the compliance curve, choose which indexwe want to use
+    :param compliance_idx: After computing the compliance curve, choose which index we want to use.
+                           Allows choice of "max", "median", "mean', or a specific idx
     :param linregress_tol: tolerance for the residual on linear regression
 
     :returns tuple: tau, plat, compliance, resistance
     """
-    if len(flow[:x0_index-1]) <= compliance_idx:
+    if isinstance(compliance_idx, int) and len(flow[:x0_index-1]) <= compliance_idx:
         return np.nan, np.nan, np.nan, np.nan
-    tau = al_rawas_expiratory_const(flow, vols, x0_index, dt, tvi, linregress_tol)
+    tau = al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol)
     compliance_curve = [
         (vol + tau * flow[i]) / (max(pressure[:i+1]) - peep)
         for i, vol in enumerate(vols[:x0_index-1])
     ]
-    compliance = compliance_curve[compliance_idx]
+    if compliance_idx == 'max':
+        compliance = max(compliance_curve)
+    elif compliance_idx == 'mean':
+        compliance = np.mean(compliance_curve)
+    elif compliance_idx == 'median':
+        compliance = np.median(compliance_curve)
+    elif isinstance(compliance_idx, int):
+        compliance = compliance_curve[compliance_idx]
     resistance = tau / compliance
     plat = tvi * (1 / compliance) + peep
     return round(tau, 4), round(plat, 2), round(compliance, 4), round(resistance, 2)
