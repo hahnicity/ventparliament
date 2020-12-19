@@ -90,8 +90,8 @@ def _setup_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max, r_mi
     S = np.sum(pressure ** 2)
     # this is sum((RV(k)+EV(k) + P_mus(k)*P_ao(k)), call this T
     T = -2 * np.append([np.sum(flow * pressure), np.sum(vols * pressure)], pressure)
-
     U = construct_U(flow, vols)
+
     bm_ineq, bm_eq = construct_bound_mats(len(flow), x0, m_idx)
 
     bounds = [(r_min, r_max), (e_min, e_max)] + [(p_min, p_max) for i in range(len(flow))]
@@ -103,7 +103,7 @@ def _setup_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max, r_mi
 
 def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, e_max=100, e_min=0, p_min=-15, p_max=20, initial_guess=None):
     """
-    :param flow: numpy array. Units denoted in L/min like vent returns
+    :param flow: numpy array. Units denoted in L/s
     :param vols: numpy array. Units denoted in L
     :param pressure: numpy array. Units in cm H20.
     :param x0: index at which the breath begins expiratory phase
@@ -118,8 +118,6 @@ def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100,
                   points m between 0 and x0. Then you can determine which value m gives you the
                   lowest residual and then use that value for you final result.
     """
-    # XXX maybe I'm using the wrong units for this eq. because constrained optim is pretty
-    # consistently giving bad results
     obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess
     )
@@ -139,7 +137,7 @@ def optimize_insp_lim_only(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, 
     Only run vicario constrained algo for the inspiratory lim. This has the advantage of removing
     any pesky problems if the patient is efforting on the exhale.
 
-    :param flow: numpy array. Units denoted in L/min like vent returns
+    :param flow: numpy array. Units denoted in L/s
     :param vols: numpy array. Units denoted in L
     :param pressure: numpy array. Units in cm H20.
     :param x0: index at which the breath begins expiratory phase

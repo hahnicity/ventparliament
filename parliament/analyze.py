@@ -26,6 +26,18 @@ from parliament.pressure_ctrl_correction import perform_algo as kannangara
 from parliament.vicario_constrained import perform_constrained_optimization
 
 
+class MetadataRow(object):
+    """
+    Basically does the same thing I want with pd.Series, but its faster in doing its job
+    """
+    def __init__(self, data):
+        self.data = data
+        self.attr_to_idx = {attr: i for i, attr in enumerate(META_HEADER)}
+
+    def __getattr__(self, attr):
+        return self.data[self.attr_to_idx[attr]]
+
+
 class FileCalculations(object):
     def __init__(self, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, **kwargs):
         """
@@ -77,9 +89,9 @@ class FileCalculations(object):
         if len(self.breath_data) == 0:
             raise Exception('ventmap found 0 breaths in file: {}! Is this an error?'.format(filename))
         self.dt = self.breath_data[0]['dt']
-        self.breath_metadata = pd.DataFrame([
-            get_production_breath_meta(breath) for breath in self.breath_data
-        ], columns=META_HEADER)
+        self.breath_metadata = [
+            MetadataRow(get_production_breath_meta(breath)) for breath in self.breath_data
+        ]
         self.recorded_gold = np.nan if not recorded_compliance else recorded_compliance
         # XXX want to make this into a dict eventually
         self.reconstruction_methods = {
@@ -144,6 +156,8 @@ class FileCalculations(object):
             return self.breath_volumes[breath_idx]
         else:
             breath = self.breath_data[breath_idx]
+            # need to divide by 60 here because we are expressing dx in terms of seconds. If we
+            # didnt want to divide by 60 then we would need to express dx in terms of minutes
             flow = np.array(breath['flow']) / 60
             vols = calc_volumes(flow, self.dt)
             self.breath_volumes[breath_idx] = vols
@@ -155,7 +169,7 @@ class FileCalculations(object):
             return self.peeps[breath_idx]
 
         min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
-        peep = self.breath_metadata.iloc[min_idx:breath_idx+1].PEEP.median()
+        peep = np.median([row.PEEP for row in self.breath_metadata[min_idx:breath_idx+1]])
         self.peeps[breath_idx] = peep
         return peep
 
@@ -164,7 +178,7 @@ class FileCalculations(object):
         Helper method for the least squares methods
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         pressure = breath['pressure']
         peep = self._get_median_peep(breath_idx)
@@ -179,7 +193,7 @@ class FileCalculations(object):
         Convenience method for PREDATOR. Assumes you've already reconstructed your pressure.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         peep = self._get_median_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
@@ -190,7 +204,7 @@ class FileCalculations(object):
 
     def al_rawas(self, breath_idx):
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         vols = self._calc_breath_volume(breath_idx)
         tau, plat, comp, res = al_rawas_calcs(
@@ -214,7 +228,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         return al_rawas_expiratory_const(flow_l_s, bm.x0_index, self.dt, self.al_rawas_tol)
 
@@ -225,7 +239,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         # brunner recommends using a MA filter to smooth the flow curve and perform approximations.
         # for our purpose currently we will not implement this. We can move to optimizations later.
         tau = brunner(bm.tve/1000, bm.eTime, abs(min(breath['flow'])/60), self.brunner_iters)
@@ -254,7 +268,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         if breath_idx in self.ii_reconstructed_pressures:
             pressure = self.ii_reconstructed_pressures[breath_idx]
         else:
@@ -274,7 +288,7 @@ class FileCalculations(object):
         # XXX if you want this to go faster on the full run you can probably saved cached reconstructions
         # and then pull them when you're re-running on a new algo.
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
         peep = self._get_median_peep(breath_idx)
@@ -314,7 +328,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         peep = self._get_median_peep(breath_idx)
         pressure = breath['pressure']
@@ -342,7 +356,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow = breath['flow']
         peep = self._get_median_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
@@ -357,7 +371,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         tve = bm.tve / 1000
         tc_option = {25: 0, 50: 1, 75: 2, 100: 3}[self.lourens_tc_choice]
@@ -395,7 +409,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
         peep = self._get_median_peep(breath_idx)
@@ -410,7 +424,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
         peep = self._get_median_peep(breath_idx)
@@ -457,11 +471,9 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
-        flow = np.array(breath['flow'])
+        bm = self.breath_metadata[breath_idx]
+        flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
-        # need to divide by 60 here because we are expressing dx in terms of seconds. If we
-        # didnt want to divide by 60 then we would need to express dx in terms of minutes
         vols = self._calc_breath_volume(breath_idx)
         elas, res, p_mus, pao_preds, residual = perform_constrained_optimization(
             flow, vols, pressure, bm.x0_index, self.vicario_co_m_idx
@@ -477,7 +489,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         pressure = breath['pressure']
         tvi = bm.tvi / 1000
@@ -498,7 +510,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        bm = self.breath_metadata.iloc[breath_idx]
+        bm = self.breath_metadata[breath_idx]
         rel_bn = breath['rel_bn']
         flow = np.array(breath['flow'])
         pressure = np.array(breath['pressure'])
