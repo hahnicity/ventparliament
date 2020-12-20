@@ -80,7 +80,7 @@ def least_squares_flow_fit(flow, vols, pressure, peep, dt=0.02):
     return 1 / elastance, resistance, residual
 
 
-def perform_algo(flow, pressure, x0, peep, auc_thresh, debug=False):
+def perform_algo(flow, vols, pressure, x0, peep, auc_thresh, debug=False):
     """
     Perform the Kannangara algorithm to improve fit of least squares algo in pressure
     modes for asynchronously breathing patients.

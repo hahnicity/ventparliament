@@ -4,9 +4,13 @@ main
 """
 import argparse
 from pathlib import Path
+import sys
+import traceback
 
+import colorcet as cc
 import numpy as np
 import pandas as pd
+from scipy.stats import median_absolute_deviation
 
 from parliament.analyze import FileCalculations
 
@@ -68,10 +72,10 @@ class ResultsContainer(object):
             del analysis[algo][-1]
         return analysis
 
-    def collate_data(self):
+    def collate_data(self, algos_used):
         """
         Now that (presumably) all patient results have been tabulated we can finally determine
-        what our gold standard compliances are for specific time points.
+        what our gold standard compliances are for specific time points. Filter
         """
         all_results = pd.concat(self.all_results)
         all_results.index = range(len(all_results))
@@ -83,10 +87,34 @@ class ResultsContainer(object):
                 plats_in_range = valid_plats[(valid_plats.abs_bs - pd.Timedelta(hours=0.5) < row.abs_bs) & (row.abs_bs < valid_plats.abs_bs + pd.Timedelta(hours=0.5))]
                 all_results.loc[i, 'gold_stnd_compliance'] = plats_in_range.gold_stnd_compliance.mean()
         self.all_results = all_results
+        # filter outliers by patient
+        for algo in algos_used:
+            for patient_id, df in self.all_results.groupby('patient_id'):
+                inf_idxs = df[(df[algo] == np.inf) | (df[algo] == -np.inf)].index
+                df.loc[inf_idxs, algo] = np.nan
+                self.all_results.loc[inf_idxs, algo] = np.nan
+                # I've found that mean can blow up in the presence of outliers. So instead use
+                # the median
+                algo_median = df[algo].median(skipna=True)
+                algo_mad = median_absolute_deviation(df[algo].values, nan_policy='omit')
+                # multiply the algo mad by 20 because we want to be absolutely sure we arent
+                # removing any results that may be within range of the actual ground truth
+                self.all_results.loc[df[df[algo].abs() >= (algo_median + 20*algo_mad)].index, algo] = np.nan
+
+    def save_results(self, experiment_name):
+        results_dir = Path(__file__).parent.joinpath('results')
+        if not results_dir.exists():
+            results_dir.mkdir()
+        experiment_dir = results_dir.joinpath(experiment_name)
+        if not experiment_dir.exists():
+            experiment_dir.mkdir()
+        self.all_results.to_pickle(str(experiment_dir.joinpath('all_results.pkl')))
 
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('experiment_name')
+    parser.add_argument('--only-patient', help='only run results for specific patient', nargs='*')
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
     args = parser.parse_args()
 
@@ -98,29 +126,33 @@ def main():
     for dir_ in sorted(list(all_patient_dirs)):
         patient_id = dir_.name
         for file in dir_.glob('*.raw.npy'):
-            # XXX debug just keep this line around in case a patient is failing for now
-            if '0210RPI' not in str(file):
+            patient_id = file.parent.name
+            if args.only_patient and patient_id not in args.only_patient:
                 continue
-            # XXX debug
             extra = pd.read_pickle(str(file).replace('raw.npy', 'extra.pkl'))
             calcs = FileCalculations(str(file), 'all', 9, extra)
-            calcs.analyze_file()
+            try:
+                calcs.analyze_file()
+            except Exception as err:
+                print('Failed on file: {}'.format(str(file)))
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                traceback.print_tb(exc_traceback)
+                print(err)
+                return
             results.add_results_df(patient_id, calcs.results)
-    results.collate_data()
-    algos_used = set(results.all_results.columns).intersection(set(list(calcs.algo_mapping.keys())))
+    algos_used = list(set(calcs.results.columns).intersection(set(list(calcs.algo_mapping.keys()))))
+    results.collate_data(algos_used)
+    results.save_results(args.experiment_name)
 
 #    # XXX debug
-    #import IPython; IPython.embed()
     import matplotlib.pyplot as plt
     patient_results = results.all_results
-    for algo in algos_used:
-        preds = patient_results[algo]
-        plt.plot(preds, label=algo)
-    gt = patient_results['gold_stnd_compliance']
-    plt.plot(gt, label='gt')
-    plt.legend()
-    plt.show()
-    plt.close()
+    for pt, df in results.all_results.groupby('patient_id'):
+        df[algos_used].plot(title=pt, figsize=(3*8, 4*3), fontsize=6, colormap=cc.cm.glasbey)
+        gt = patient_results['gold_stnd_compliance']
+        plt.plot(gt, label='gt')
+        plt.show()
+        plt.close()
 
 
 if __name__ == '__main__':

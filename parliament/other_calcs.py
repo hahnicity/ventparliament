@@ -308,8 +308,8 @@ def vicario_nieap(flow, pressure, x0_index, peep, tvi, tau):
     :returns tuple: plateau pressure, compliance, resistance
     """
     # return a nan if we are not going to get a sensible response from the algo.
-    if (tvi/tau) + flow[x0_index-1] - flow[0] < 0.0:
-        return np.nan
+    if (tvi/tau) + flow[x0_index-1] - flow[0] <= 0.0:
+        return np.nan, np.nan, np.nan
     resistance = (pressure[x0_index-1] - pressure[0]) / ((tvi/tau) + flow[x0_index-1] - flow[0])
     elastance = resistance / tau
     compliance = 1 / elastance

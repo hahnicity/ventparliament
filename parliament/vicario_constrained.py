@@ -92,7 +92,10 @@ def _setup_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max, r_mi
     T = -2 * np.append([np.sum(flow * pressure), np.sum(vols * pressure)], pressure)
     U = construct_U(flow, vols)
 
-    bm_ineq, bm_eq = construct_bound_mats(len(flow), x0, m_idx)
+    try:
+        bm_ineq, bm_eq = construct_bound_mats(len(flow), x0, m_idx)
+    except:
+        import IPython; IPython.embed()
 
     bounds = [(r_min, r_max), (e_min, e_max)] + [(p_min, p_max) for i in range(len(flow))]
     obj = lambda x: objective(S, T, U, x)
@@ -118,6 +121,8 @@ def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100,
                   points m between 0 and x0. Then you can determine which value m gives you the
                   lowest residual and then use that value for you final result.
     """
+    if m_idx >= len(flow)-1 or m_idx >= x0:
+        return np.nan, np.nan, np.nan, np.nan, np.nan
     obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess
     )
@@ -148,6 +153,8 @@ def optimize_insp_lim_only(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, 
                   it on VC you might be able to look at pressure curve deflection, or flow deflection
                   of PC/PS.
     """
+    if m_idx >= len(flow)-1 or m_idx >= x0:
+        return np.nan, np.nan, np.nan, np.nan, np.nan
     flow, pressure, vols = flow[:x0], pressure[:x0], vols[:x0]
     obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess

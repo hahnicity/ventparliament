@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.sw[op]
 *.lprof
+*.bak
 
 # repo specific items
 cohort.csv
