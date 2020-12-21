@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import median_absolute_deviation
+import seaborn as sns
 
 from parliament.analyze import FileCalculations
 
@@ -36,6 +37,14 @@ class ResultsContainer(object):
         res.proc_results = pd.read_pickle(res.results_dir.joinpath('proc_results.pkl').resolve())
         res.algos_used = res.proc_results.columns[3:-3]
         return res
+
+    @classmethod
+    def load_from_experiment_name(cls, experiment_name):
+        """
+        Load results container but even easier using the container.pkl obj
+        """
+        results_dir = Path(__file__).parent.joinpath('results', experiment_name)
+        return pd.read_pickle(results_dir.joinpath('ResultsContainer.pkl'))
 
     def add_results_df(self, patient, dataframe):
         """
@@ -66,19 +75,17 @@ class ResultsContainer(object):
 
         # per patient results
         all_patient_results = []
-        pt_cols = ['patient_id'] + ['{}_mad'.format(algo) for algo in self.algos_used] + ['{}_std'.format(algo) for algo in self.algos_used]
+        pt_cols = ['patient_id', 'algo', 'mad', 'std']
         for patient_id, df in self.proc_results.groupby('patient_id'):
-            row = [patient_id]
-            # find MAD per patient
+            # find MAD per patient, per algo
             for algo in self.algos_used:
+                row = [patient_id, algo]
                 df['{}_diff'.format(algo)] = df['gold_stnd_compliance'] - df[algo]
                 self.proc_results.loc[df.index, '{}_diff'.format(algo)] = df['{}_diff'.format(algo)]
                 row.append(median_absolute_deviation(df['{}_diff'.format(algo)], nan_policy='omit'))
-
-            # Find std per patient
-            for algo in self.algos_used:
                 row.append(df[algo].std())
-            all_patient_results.append(row)
+                all_patient_results.append(row)
+
         self.all_patient_results = pd.DataFrame(all_patient_results, columns=pt_cols)
 
     def collate_data(self, algos_used):
@@ -117,11 +124,12 @@ class ResultsContainer(object):
         """
         # Do scatter of MAD by std
         mad_std = {algo: [[], []] for algo in self.algos_used}
-        for _, row in self.all_patient_results.iterrows():
+        for patient_id, df in self.all_patient_results.groupby('patient_id'):
             for algo in self.algos_used:
+                row = df[df.algo == algo].iloc[0]
                 # mad on x axis, std on y
-                mad_std[algo][0].append(row['{}_mad'.format(algo)])
-                mad_std[algo][1].append(row['{}_std'.format(algo)])
+                mad_std[algo][0].append(row['mad'])
+                mad_std[algo][1].append(row['std'])
 
         algo_dists = []
         for algo in self.algos_used:
@@ -138,7 +146,7 @@ class ResultsContainer(object):
         markers = {
             'predator': 'P'
         }
-        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H']
+        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', 4]
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
         for i, algo in enumerate(algos_in_order):
@@ -154,7 +162,7 @@ class ResultsContainer(object):
                 marker=markers[i],
                 color=color,
                 alpha=.9,
-                s=500,
+                s=350,
                 edgecolors='black',
                 zorder=len(self.algos_used)+2-i,
                 linewidths=1,
@@ -165,10 +173,23 @@ class ResultsContainer(object):
         ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
         fig.legend(fontsize=16, loc='center right')
         ax.grid()
-        ax.title('Patient by patient results. No filters')
+        ax.set_title('Patient by patient results. No filters')
         fig.savefig(self.results_dir.joinpath('patient_by_patient_result.png').resolve(), dpi=600)
         fig.show()
 
+        fig, ax = plt.subplots(figsize=(3*8, 3*2))
+        sns.boxplot(x='algo', y='mad', data=self.all_patient_results, order=algos_in_order)
+        ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=12)
+        ax.set_xlabel('Algorithm', fontsize=12)
+        fig.savefig(self.results_dir.joinpath('patient_by_patient_mad_boxplot_result.png').resolve(), dpi=600)
+        fig.show()
+
+        fig, ax = plt.subplots(figsize=(3*8, 3*2))
+        sns.boxplot(x='algo', y='std', data=self.all_patient_results, order=algos_in_order)
+        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=12)
+        ax.set_xlabel('Algorithm', fontsize=12)
+        fig.savefig(self.results_dir.joinpath('patient_by_patient_std_boxplot_result.png').resolve(), dpi=600)
+        fig.show()
         # XXX run analysis by ventmode
 
 
