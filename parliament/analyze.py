@@ -530,9 +530,9 @@ class FileCalculations(object):
                     'params for calc_inspiratory_plateau.'
                 )
             gold = (tvi / 1000.0) / (plat - peep)
-            breath_results = [rel_bn, abs_bs, gold]
+            breath_results = [rel_bn, abs_bs, gold, ventmode]
         else:
-            breath_results = [rel_bn, abs_bs, self.recorded_gold]
+            breath_results = [rel_bn, abs_bs, self.recorded_gold, ventmode]
 
         for algo in self.algorithms_to_use:
             if ventmode in ['pc', 'prvc'] and algo in self.algos_unavailable_for_pc_prvc:
