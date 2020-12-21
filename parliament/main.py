@@ -186,6 +186,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('experiment_name')
     parser.add_argument('--only-patient', help='only run results for specific patient', nargs='*')
+    parser.add_argument('--algos', nargs="*", default='all')
+    parser.add_argument('--tc-algo', choices=['al_rawas', 'lourens', 'brunner'], default='al_rawas')
+    parser.add_argument('-ltc', '--lourens-tc-choice', type=int, default=75)
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
 
     args = parser.parse_args()
@@ -202,7 +205,7 @@ def main():
             if args.only_patient and patient_id not in args.only_patient:
                 continue
             extra = pd.read_pickle(str(file).replace('raw.npy', 'extra.pkl'))
-            calcs = FileCalculations(str(file), 'all', 9, extra)
+            calcs = FileCalculations(str(file), args.algos, 9, extra, tc_algo=args.tc_algo, lourens_tc_choice=args.lourens_tc_choice)
             try:
                 calcs.analyze_file()
             except Exception as err:

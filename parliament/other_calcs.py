@@ -71,7 +71,7 @@ def al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol):
     return regress.slope
 
 
-def al_rawas_calcs(flow, vols, pressure, x0_index, dt, pip, peep, tvi, compliance_idx, linregress_tol=.98):
+def al_rawas_calcs(flow, vols, pressure, x0_index, dt, pip, peep, tvi, compliance_idx, linregress_tol=.98, tau=None):
     """
     Calculate compliance using al-rawas methodology
 
@@ -90,12 +90,14 @@ def al_rawas_calcs(flow, vols, pressure, x0_index, dt, pip, peep, tvi, complianc
     :param compliance_idx: After computing the compliance curve, choose which index we want to use.
                            Allows choice of "max", "median", "mean', or a specific idx
     :param linregress_tol: tolerance for the residual on linear regression
+    :param tau: input time const. optional, if not set defaults to al-rawas time const
 
     :returns tuple: tau, plat, compliance, resistance
     """
     if isinstance(compliance_idx, int) and len(flow[:x0_index-1]) <= compliance_idx:
         return np.nan, np.nan, np.nan, np.nan
-    tau = al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol)
+    if tau is None:
+        tau = al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol)
     compliance_curve = [
         (vol + tau * flow[i]) / (max(pressure[:i+1]) - peep)
         for i, vol in enumerate(vols[:x0_index-1])
@@ -245,48 +247,43 @@ def inspiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
     return perform_least_squares(a, pressure[:end_idx], tvi, peep)
 
 
-def lourens_time_const(flow, vols, tve, x0_index, dt):
+def lourens_time_const(flow, tve, x0_index, dt, percentage_target):
     """
-    Calculate Lourens time constant for patients. Lourens performed her
-    calculations on paralyzed COPD patients. So it might be helpful in
-    this case.
+    Calculate Lourens time constant for patients. Although Lourens used 4 fixed percentage
+    targets in their paper, you are free to set whatever target you wish.
 
     Lourens M, van den Berg B, Aerts JG, Verbraak A, Hoogsteden H, Bogaard J. Expiratory
     time constants in mechanically ventilated patients with and without COPD. Intensive
     care medicine. 2000 Nov 1;26(11):1612-8.
 
     :param flow: numpy array vals of flow measurements in L/s
-    :param vols: breath volume in L per observation of the flow array
     :param tve: expiratory tidal volume in L
     :param x0_index: index where flow crosses 0
     :param dt: time delta between obs
+    :param percentage_target: specific percentage of exhaled tidal volume you want to target for the time constant. Can be between 1 and 100
 
-    :returns tuple: RCfv25, RCFv50, RCfv75, RCFv100
+    :returns tuple: RCfvN (where N is your percentage_target)
     """
     # there was no identifiable expiratory location
     if x0_index >= len(flow):
         return (np.nan, np.nan, np.nan, np.nan)
 
-    min_idx = np.argmin(flow)
+    if not 1<=percentage_target<=100:
+        raise Exception('Lourens time constant percentage_target should be set between 1 and 100!')
+
     flow = np.abs(flow)
+    vols = calc_volumes(flow[x0_index-1:], dt)
 
-    v25, v50, v75 = tve/4.0, tve/2.0, tve*(3/4.0)
-    v25_idx, v50_idx, v75_idx, v100_idx = None, None, None, None
+    volume_target = tve * (percentage_target/100)
+    volume_idx = None
     for idx, v in enumerate(vols[1:]):
-        if v >= v25 and vols[idx-1] < v25:
-            v25_idx = idx
-        elif v >= v50 and vols[idx-1] < v50:
-            v50_idx = idx
-        elif v >= v75 and vols[idx-1] < v75:
-            v75_idx = idx
-        elif v >= tve and vols[idx-1] < tve:
-            v100_idx = idx
+        # Note we dont use the idx+1 indexing here because we assume
+        # that the volume expired was passed in between the last obs and
+        # the current obs
+        if v >= volume_target:
+            volume_idx = idx
 
-    rcfv25 = (tve*.25) / (flow[v25_idx]-flow[-1])
-    rcfv50 = (tve*.5) / (flow[v50_idx]-flow[-1])
-    rcfv75 = (tve*.75) / (flow[v75_idx]-flow[-1])
-    rcfv100 = tve / (flow[v100_idx]-flow[-1]) if v100_idx is not None else np.nan
-    return rcfv25, rcfv50, rcfv75, rcfv100
+    return (tve*(percentage_target/100)) / (flow[volume_idx]-flow[-1]) if volume_idx is not None else np.nan
 
 
 def vicario_nieap(flow, pressure, x0_index, peep, tvi, tau):

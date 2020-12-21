@@ -70,7 +70,7 @@ class FileCalculations(object):
             "vicario_co_insp": self.vicario_constrained_insp_only,
             "vicario_nieap": self.vicario_nieap,
         }
-        if algorithms_to_use == 'all':
+        if algorithms_to_use == 'all' or 'all' in algorithms_to_use:
             self.algorithms_to_use = list(self.algo_mapping.keys())
         elif not isinstance(algorithms_to_use, list):
             raise Exception('algorithms_to_use var must either be a list of algos to use or "all"')
@@ -123,8 +123,8 @@ class FileCalculations(object):
         # this is the auc threshold to determine if a breath is asynchronous or not
         # for the Kannangara algo
         self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.05)
-        # lourens tc to use. Options available are 25, 50, 75, 100
-        self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 50)
+        # lourens tc to use. Options available are any percentage between 1 and 100
+        self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 75)
         # number of iters to run mipr for
         self.mipr_iters = kwargs.get('mipr_iters', 20)
         # This is a constant used in PREDATOR to determine how many breaths backward we
@@ -208,6 +208,7 @@ class FileCalculations(object):
         bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         vols = self._calc_breath_volume(breath_idx)
+        tau = self.tc_algo(breath_idx)
         tau, plat, comp, res = al_rawas_calcs(
             flow_l_s,
             vols,
@@ -218,7 +219,8 @@ class FileCalculations(object):
             self._get_median_peep(breath_idx),
             bm.tvi/1000.0,
             self.al_rawas_idx,
-            self.al_rawas_tol
+            self.al_rawas_tol,
+            tau=tau,
         )
         return comp
 
@@ -375,9 +377,7 @@ class FileCalculations(object):
         bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         tve = bm.tve / 1000
-        tc_option = {25: 0, 50: 1, 75: 2, 100: 3}[self.lourens_tc_choice]
-        vols = self._calc_breath_volume(breath_idx)
-        return lourens_time_const(flow, vols, tve, bm.x0_index, self.dt)[tc_option]
+        return lourens_time_const(flow, tve, bm.x0_index, self.dt, self.lourens_tc_choice)
 
     def major(self, breath_idx):
         """
