@@ -187,6 +187,7 @@ def main():
     parser.add_argument('experiment_name')
     parser.add_argument('--only-patient', help='only run results for specific patient', nargs='*')
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
+
     args = parser.parse_args()
 
     all_patient_dirs = Path(args.data_path).glob('*')

@@ -23,7 +23,7 @@ from parliament.other_calcs import (
 from parliament.polynomial_model import perform_polynomial_model
 from parliament.predator import max_pool_pressure_reconstruction, perform_pressure_reconstruction as predator_reconstruction
 from parliament.pressure_ctrl_correction import perform_algo as kannangara
-from parliament.vicario_constrained import perform_constrained_optimization
+from parliament.vicario_constrained import perform_constrained_optimization, perform_constrained_optimization_insp_lim_only
 
 
 class MetadataRow(object):
@@ -67,6 +67,7 @@ class FileCalculations(object):
             'polynomial': self.polynomial,
             'predator': self.predator,
             "vicario_co": self.vicario_constrained,
+            "vicario_co_insp": self.vicario_constrained_insp_only,
             "vicario_nieap": self.vicario_nieap,
         }
         if algorithms_to_use == 'all':
@@ -84,7 +85,7 @@ class FileCalculations(object):
             self.mccay_interface = McCayInterface([.5, 15.], .01, True)
         self.peeps_to_use = peeps_to_use
         self.results = []
-        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance'] + self.algorithms_to_use
+        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'artifact'] + self.algorithms_to_use
         self.breath_data = list(read_processed_file(filename))
         if len(self.breath_data) == 0:
             raise Exception('ventmap found 0 breaths in file: {}! Is this an error?'.format(filename))
@@ -482,6 +483,24 @@ class FileCalculations(object):
             return np.nan
         return 1 / elas
 
+    def vicario_constrained_insp_only(self, breath_idx):
+        """
+        Implement the vicario constrained algorithm but only on the inspiratory limb
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        pressure = np.array(breath['pressure'])
+        vols = self._calc_breath_volume(breath_idx)
+        elas, res, p_mus, pao_preds, residual = perform_constrained_optimization_insp_lim_only(
+            flow, vols, pressure, bm.x0_index, self.vicario_co_m_idx
+        )
+        if residual > self.vicario_co_residual:
+            return np.nan
+        return 1 / elas
+
     def vicario_nieap(self, breath_idx):
         """
         Perform vicario's method for NonInvasive Estimation of Alveolar Pressure (NIEAP).
@@ -530,9 +549,9 @@ class FileCalculations(object):
                     'params for calc_inspiratory_plateau.'
                 )
             gold = (tvi / 1000.0) / (plat - peep)
-            breath_results = [rel_bn, abs_bs, gold, ventmode]
+            breath_results = [rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.artifact]
         else:
-            breath_results = [rel_bn, abs_bs, self.recorded_gold, ventmode]
+            breath_results = [rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.artifact]
 
         for algo in self.algorithms_to_use:
             if ventmode in ['pc', 'prvc'] and algo in self.algos_unavailable_for_pc_prvc:

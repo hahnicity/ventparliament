@@ -91,17 +91,8 @@ def _setup_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max, r_mi
     # this is sum((RV(k)+EV(k) + P_mus(k)*P_ao(k)), call this T
     T = -2 * np.append([np.sum(flow * pressure), np.sum(vols * pressure)], pressure)
     U = construct_U(flow, vols)
-
-    try:
-        bm_ineq, bm_eq = construct_bound_mats(len(flow), x0, m_idx)
-    except:
-        import IPython; IPython.embed()
-
-    bounds = [(r_min, r_max), (e_min, e_max)] + [(p_min, p_max) for i in range(len(flow))]
     obj = lambda x: objective(S, T, U, x)
-    ieq_con = lambda p_mus: bm_ineq.dot(p_mus)
-    eq_con = lambda p_mus: bm_eq.dot(p_mus)
-    return obj, initial_guess, bounds, ieq_con, eq_con
+    return obj, initial_guess
 
 
 def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, e_max=100, e_min=0, p_min=-15, p_max=20, initial_guess=None):
@@ -123,7 +114,12 @@ def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100,
     """
     if m_idx >= len(flow)-1 or m_idx >= x0:
         return np.nan, np.nan, np.nan, np.nan, np.nan
-    obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
+    bm_ineq, bm_eq = construct_bound_mats(len(flow), x0, m_idx)
+    bounds = [(r_min, r_max), (e_min, e_max)] + [(p_min, p_max) for i in range(len(flow))]
+    ieq_con = lambda p_mus: bm_ineq.dot(p_mus)
+    eq_con = lambda p_mus: bm_eq.dot(p_mus)
+
+    obj, initial_guess = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess
     )
     # this can get an error "x0 violates bound constraints if you have scipy 1.5.X. So as a result,
@@ -137,7 +133,7 @@ def perform_constrained_optimization(flow, vols, pressure, x0, m_idx, r_max=100,
     return E, R, P_mus, pao_preds, residual
 
 
-def optimize_insp_lim_only(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, e_max=100, e_min=0, p_min=-15, p_max=20, initial_guess=None):
+def perform_constrained_optimization_insp_lim_only(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, e_max=100, e_min=0, p_min=-15, p_max=20, initial_guess=None):
     """
     Only run vicario constrained algo for the inspiratory lim. This has the advantage of removing
     any pesky problems if the patient is efforting on the exhale.
@@ -156,7 +152,12 @@ def optimize_insp_lim_only(flow, vols, pressure, x0, m_idx, r_max=100, r_min=0, 
     if m_idx >= len(flow)-1 or m_idx >= x0:
         return np.nan, np.nan, np.nan, np.nan, np.nan
     flow, pressure, vols = flow[:x0], pressure[:x0], vols[:x0]
-    obj, initial_guess, bounds, ieq_con, eq_con = _setup_constrained_optimization(
+
+    bm_ineq = construct_bound_mats_ineq(len(flow), x0, m_idx)
+    bounds = [(r_min, r_max), (e_min, e_max)] + [(p_min, p_max) for i in range(len(flow))]
+    ieq_con = lambda p_mus: bm_ineq.dot(p_mus)
+
+    obj, initial_guess = _setup_constrained_optimization(
         flow, vols, pressure, x0, m_idx, r_max, r_min, e_max, e_min, p_min, p_max, initial_guess
     )
     result = fmin_slsqp(obj, initial_guess, f_ieqcons=ieq_con, bounds=bounds)
