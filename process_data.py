@@ -8,10 +8,14 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+# this is from our private async detection repository. You are welcome to use other
+# methods to detect asynchronies. There are a number of machine learning methods
+# that are free and available for use.
+from algorithms.tor5 import detectPVI
 import numpy as np
 import pandas as pd
 
-from ventmap.raw_utils import extract_raw, process_breath_file
+from ventmap.raw_utils import extract_raw, process_breath_file, read_processed_file
 from ventmap.SAM import check_if_plat_occurs
 
 
@@ -116,7 +120,19 @@ class Processing(object):
 
                 extra_output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', '.extra.pkl'))
                 process_breath_file(desc, False, str(output_fname), spec_rel_bns=extra_br_metadata[:, 0])
-                pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat', 'ventmode']).to_pickle(str(extra_output_fname))
+                extra_results_frame = pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat', 'ventmode'])
+
+            # this is where we use our private PVA detection software. For outside purposes, we've
+            # saved the results to file. You can use the results of the algorithm in your own
+            # reproduction if you need.
+            pva, pva_fused = detectPVI(read_processed_file(str(output_fname)+'.raw.npy'), output_subdir='/tmp', write_results=False)
+            # this stands for double trigger asynchrony
+            extra_results_frame['dta'] = pva['dbl.4']
+            # this stands for breath stacking asynchrony
+            extra_results_frame['bsa'] = pva['bs.1or2']
+            # this stands for breathing artifacts like suction, cough, etc.
+            extra_results_frame['artifact'] = pva['cosumtvd']
+            extra_results_frame.to_pickle(str(extra_output_fname))
 
     def iter_raw_dir(self, only_patient):
         for patient_id, rows in self.cohort.groupby('patient_id'):
