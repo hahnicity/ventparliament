@@ -3,6 +3,7 @@ main
 ~~~~
 """
 import argparse
+from copy import copy
 from pathlib import Path
 import sys
 import traceback
@@ -58,6 +59,23 @@ class ResultsContainer(object):
         dataframe['gold_orig'] = dataframe['gold_stnd_compliance']
         self.raw_results.append(dataframe)
 
+    def analyze_individual_df(self, df):
+        """
+        Helper method for analyze_results
+        """
+        row_results = []
+        for patient_id, frame in df.groupby('patient_id'):
+            # find MAD per patient, per algo
+            for algo in self.algos_used:
+                row = [patient_id, algo]
+                frame['{}_diff'.format(algo)] = frame['gold_stnd_compliance'] - frame[algo]
+                frame.loc[frame.index, '{}_diff'.format(algo)] = frame['{}_diff'.format(algo)]
+                row.append(median_absolute_deviation(frame['{}_diff'.format(algo)], nan_policy='omit'))
+                row.append(frame[algo].std())
+                row_results.append(row)
+        cols = ['patient_id', 'algo', 'mad', 'std']
+        return pd.DataFrame(row_results, columns=cols)
+
     def analyze_results(self):
         """
         Analyze all results obtained.
@@ -70,23 +88,19 @@ class ResultsContainer(object):
             warn('Called analyze_results before any results were collated. Call collate_data first!')
             return
 
-        # all breath results
-        # XXX
-
-        # per patient results
-        all_patient_results = []
-        pt_cols = ['patient_id', 'algo', 'mad', 'std']
-        for patient_id, df in self.proc_results.groupby('patient_id'):
-            # find MAD per patient, per algo
-            for algo in self.algos_used:
-                row = [patient_id, algo]
-                df['{}_diff'.format(algo)] = df['gold_stnd_compliance'] - df[algo]
-                self.proc_results.loc[df.index, '{}_diff'.format(algo)] = df['{}_diff'.format(algo)]
-                row.append(median_absolute_deviation(df['{}_diff'.format(algo)], nan_policy='omit'))
-                row.append(df[algo].std())
-                all_patient_results.append(row)
-
-        self.all_patient_results = pd.DataFrame(all_patient_results, columns=pt_cols)
+        self.all_patient_results = self.analyze_individual_df(self.proc_results)
+        vc_only = self.proc_results[self.proc_results.ventmode == 'vc']
+        self.vc_results = self.analyze_individual_df(vc_only)
+        pressure_modes = self.proc_results[self.proc_results.ventmode.isin(['pc', 'prvc'])]
+        self.pressure_results = self.analyze_individual_df(pressure_modes)
+        asynchronies = self.proc_results[(self.proc_results.dta != 0) | (self.proc_results.bsa != 0)]
+        self.async_results = self.analyze_individual_df(asynchronies)
+        artifacts = self.proc_results[self.proc_results.artifact != 0]
+        self.artifact_results = self.analyze_individual_df(artifacts)
+        vc_only_async = self.proc_results[(self.proc_results.ventmode == 'vc') & ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0))]
+        self.vc_only_async_results = self.analyze_individual_df(vc_only_async)
+        pressure_only_async = self.proc_results[(self.proc_results.ventmode != 'vc') & ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0))]
+        self.pressure_only_async_results = self.analyze_individual_df(pressure_only_async)
 
     def collate_data(self, algos_used):
         """
@@ -118,49 +132,61 @@ class ResultsContainer(object):
                 # removing any results that may be within range of the actual ground truth
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 15*algo_mad)].index, algo] = np.nan
 
-    def plot_per_patient_results(self):
-        """
-        Plot patient by patient results
-        """
+    def preprocess_mad_std_in_df(self, df):
         # Do scatter of MAD by std
-        mad_std = {algo: [[], []] for algo in self.algos_used}
-        for patient_id, df in self.all_patient_results.groupby('patient_id'):
-            for algo in self.algos_used:
-                row = df[df.algo == algo].iloc[0]
-                # mad on x axis, std on y
-                mad_std[algo][0].append(row['mad'])
-                mad_std[algo][1].append(row['std'])
-
+        mad_std = {algo: [[], [], None, None, None] for algo in self.algos_used}
         algo_dists = []
         for algo in self.algos_used:
+            # mad on x axis, std on y
+            mad_std[algo][0] = df[df.algo == algo]['mad']
+            if np.isnan(mad_std[algo][0]).all():
+                del mad_std[algo]
+                continue
+            mad_std[algo][1] = df[df.algo == algo]['std']
             mean_mad = np.nanmean(mad_std[algo][0])
             mean_std = np.nanmean(mad_std[algo][1])
-            algo_dists.append([np.sqrt(mean_mad**2+mean_std**2), mean_mad, mean_std])
-        # sort items so we can give them higher z order based on precedence
-        algo_ordering = np.argsort(np.array(algo_dists)[:,0])
-        inverse_ordering = list(np.argsort(algo_ordering))
-        algos_in_order = np.array(self.algos_used)[algo_ordering]
+            mad_std[algo][2] = mean_mad
+            mad_std[algo][3] = mean_std
+            # euclidean distance to origin (0, 0)
+            mad_std[algo][4] = np.sqrt(mean_mad**2+mean_std**2)
+            algo_dists.append(np.sqrt(mean_mad**2+mean_std**2))
 
-        # XXX I want to have custom math text for my markers. But that means I also need
-        # to individually find markers. So gonna punt on this for now
-        markers = {
-            'predator': 'P'
-        }
-        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', 4]
+        # sort items so we can give them higher z order based on precedence
+        algo_ordering = np.argsort(np.array(algo_dists))
+        algos_used = [algo for algo in copy(self.algos_used) if algo in mad_std]
+        algos_in_order = np.array(algos_used)[algo_ordering]
+        return mad_std, algos_in_order
+
+    def plot_algo_scatter(self, df, plt_title, figname):
+        """
+        Perform scatterplot for all available algos based on an input dataframe.
+
+        X-axis is MAD and Y-axis is std.
+        """
+        mad_std, algos_in_order = self.preprocess_mad_std_in_df(df)
+        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Delta$']
+        colors = [cc.cm.glasbey(i) for i in range(len(self.algos_used))]
+        algo_dict = {algo: {'m': markers[i], 'c': colors[i]} for i, algo in enumerate(self.algos_used)}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
         for i, algo in enumerate(algos_in_order):
-            color = cc.cm.glasbey(i)
-            ax.scatter(x=mad_std[algo][0], y=mad_std[algo][1], marker=markers[i], color=color, label=algo, alpha=0.4, s=100, zorder=1)
+            ax.scatter(
+                x=mad_std[algo][0],
+                y=mad_std[algo][1],
+                marker=algo_dict[algo]['m'],
+                color=algo_dict[algo]['c'],
+                label=algo,
+                alpha=0.4,
+                s=100,
+                zorder=1
+            )
 
         for i, algo in enumerate(algos_in_order):
-            color = cc.cm.glasbey(i)
-            orig_loc = inverse_ordering.index(i)
             ax.scatter(
-                x=algo_dists[orig_loc][1],
-                y=algo_dists[orig_loc][2],
-                marker=markers[i],
-                color=color,
+                x=mad_std[algo][2],
+                y=mad_std[algo][3],
+                marker=algo_dict[algo]['m'],
+                color=algo_dict[algo]['c'],
                 alpha=.9,
                 s=350,
                 edgecolors='black',
@@ -171,29 +197,45 @@ class ResultsContainer(object):
         ax.tick_params(axis='y', labelsize=14)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
+        ax.set_xlim(-.001, .011)
         fig.legend(fontsize=16, loc='center right')
         ax.grid()
-        ax.set_title('Patient by patient results. No filters')
-        fig.savefig(self.results_dir.joinpath('patient_by_patient_result.png').resolve(), dpi=600)
-        fig.show()
+        ax.set_title(plt_title)
+        fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=600)
+        return mad_std, algos_in_order
 
+    def plot_algo_mad_std_boxplots(self, df, algo_ordering, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
-        sns.boxplot(x='algo', y='mad', data=self.all_patient_results, order=algos_in_order)
+        sns.boxplot(x='algo', y='mad', data=df, order=algo_ordering)
         ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=12)
         ax.set_xlabel('Algorithm', fontsize=12)
-        fig.savefig(self.results_dir.joinpath('patient_by_patient_mad_boxplot_result.png').resolve(), dpi=600)
-        fig.show()
+        fig.savefig(self.results_dir.joinpath('{}_mad_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=600)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
-        sns.boxplot(x='algo', y='std', data=self.all_patient_results, order=algos_in_order)
+        sns.boxplot(x='algo', y='std', data=df, order=algo_ordering)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=12)
         ax.set_xlabel('Algorithm', fontsize=12)
-        fig.savefig(self.results_dir.joinpath('patient_by_patient_std_boxplot_result.png').resolve(), dpi=600)
-        fig.show()
-        # XXX run analysis by ventmode
+        fig.savefig(self.results_dir.joinpath('{}_std_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=600)
 
-
-        # XXX next plot based on asynchronous data
+    def plot_per_patient_results(self):
+        """
+        Plot patient by patient results
+        """
+        mad_std, algos_in_order = self.plot_algo_scatter(self.all_patient_results, 'Patient by patient results. No filters', 'patient_by_patient_result.png')
+        self.plot_algo_mad_std_boxplots(self.all_patient_results, algos_in_order, 'patient_by_patient')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.vc_results, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png')
+        self.plot_algo_mad_std_boxplots(self.vc_results, algos_in_order, 'vc_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pressure_results, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png')
+        self.plot_algo_mad_std_boxplots(self.pressure_results, algos_in_order, 'pressure_only_pbp')
+        # plot out asynchronies and artifacts across the entire cohort. We likely will not
+        # have enough data to draw any conclusions about artifacts
+        mad_std, algos_in_order = self.plot_algo_scatter(self.async_results, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png')
+        self.plot_algo_mad_std_boxplots(self.async_results, algos_in_order, 'asynchronies_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.artifact_results, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png')
+        self.plot_algo_mad_std_boxplots(self.artifact_results, algos_in_order, 'artifacts_only_pbp')
+        # group asynchronies/artifacts by mode
+        mad_std, algos_in_order = self.plot_algo_scatter(self.vc_only_async_results, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pressure_only_async_results, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png')
 
     def save_results(self):
         if not self.results_dir.parent.exists():

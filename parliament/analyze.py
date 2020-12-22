@@ -76,7 +76,7 @@ class FileCalculations(object):
             raise Exception('algorithms_to_use var must either be a list of algos to use or "all"')
         else:
             self.algorithms_to_use = algorithms_to_use
-        self.algos_unavailable_for_pc_prvc = ['iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'vicario_co']
+        self.algos_unavailable_for_pc_prvc = ['iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'vicario_co', 'vicario_co_insp', 'major', 'polynomial']
         self.algos_unavailable_for_vc = ['kannangara']
         self.extra_breath_info = extra_breath_info
         self.filename = filename
