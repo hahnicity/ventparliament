@@ -164,7 +164,7 @@ class ResultsContainer(object):
         X-axis is MAD and Y-axis is std.
         """
         mad_std, algos_in_order = self.preprocess_mad_std_in_df(df)
-        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Delta$']
+        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Join$']
         colors = [cc.cm.glasbey(i) for i in range(len(self.algos_used))]
         algo_dict = {algo: {'m': markers[i], 'c': colors[i]} for i, algo in enumerate(self.algos_used)}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))

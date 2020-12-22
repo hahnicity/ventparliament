@@ -10,10 +10,12 @@ import math
 
 import numpy as np
 from scipy.integrate import simps
-from scipy.ndimage.filters import gaussian_filter1d
+from scipy.signal import butter, filtfilt
+
+from parliament.other_calcs import calc_volumes
 
 
-def shear_transform(pressure, flow, x0_index, dt=0.02):
+def shear_transform(pressure, flow, x0_index, dt):
     """
     Follows shear transform discussed in Stevenson et al. 2012.
 
@@ -50,14 +52,16 @@ def shear_transform(pressure, flow, x0_index, dt=0.02):
     return shear_left, shear_right
 
 
-def get_predicted_flow_waveform(flow, pressure, peep, vols, dt=0.02):
-    comp, resist, residual = least_squares_flow_fit(flow, vols, pressure, peep, dt=dt)
+def get_predicted_flow_waveform(flow, pressure, peep, vols, dt):
+    comp, resist, residual = least_squares_flow_fit(flow, vols, pressure, peep, dt)
     v_dot_predicted = (pressure - peep) / resist - (1/comp) * vols / resist
     return v_dot_predicted, comp, resist, residual
 
 
-def least_squares_flow_fit(flow, vols, pressure, peep, dt=0.02):
+def least_squares_flow_fit(flow, vols, pressure, peep, dt):
     """
+    Perform least squares approximation of R and E the way that Kannangara does it in his paper.
+
     V_dot = (pressure - peep) / R - E*V / R
 
     :param flow: array vals of flow measurements in L/s
@@ -80,16 +84,17 @@ def least_squares_flow_fit(flow, vols, pressure, peep, dt=0.02):
     return 1 / elastance, resistance, residual
 
 
-def perform_algo(flow, vols, pressure, x0, peep, auc_thresh, debug=False):
+def perform_algo(flow, vols, pressure, x0, peep, dt, auc_thresh, debug=False):
     """
     Perform the Kannangara algorithm to improve fit of least squares algo in pressure
     modes for asynchronously breathing patients.
 
-    :param flow: flow in L/min, the normal way we get it from the vent
+    :param flow: flow in L/s
     :param vols: calculated volumes inspired over time
     :param pressure: pressure recordings
     :param x0: the point at which flow crosses 0
     :param peep: the PEEP set for the breath
+    :param dt: time between observations on the vent
     :param auc_thresh: The AUC threshold to determine whether the breath is async or not.
                        Anything under a certain thresh is believed to be synchronous so
                        we don't bother analyzing these breaths
@@ -109,28 +114,30 @@ def perform_algo(flow, vols, pressure, x0, peep, auc_thresh, debug=False):
         5: unknown error
         6: step 7ab bad intercept
     """
-    dt = 0.02
     # step 1, perform light noise filtering
-    flow = gaussian_filter1d(np.array(flow) / 60.0, 1)
-    pressure = gaussian_filter1d(np.array(pressure), 1)
+    b, a = butter(1, .3)
+    flow = filtfilt(b, a, flow)
+    pressure = filtfilt(b, a, pressure)
 
-    # step 2, find shear transforms
-    shear_left, shear_right = shear_transform(pressure, flow, x0)
+    # step 2, find left+right shoulders using shear transform
+    shear_left, shear_right = shear_transform(pressure, flow, x0, dt)
     if not shear_left and not shear_right:
         return np.nan, np.nan, np.nan, 2
     elif shear_right - shear_left <= 0:
         return np.nan, np.nan, np.nan, 2
 
     # step 3 perform flow reconstruction
-    pred, comp, res, resid = get_predicted_flow_waveform(flow[shear_left:shear_right+1], pressure[shear_left:shear_right+1], peep, vols[shear_left:shear_right+1])
+    max_idx = shear_right+1 if shear_right+1 < x0 else x0
+    pred, comp, res, resid = get_predicted_flow_waveform(flow[shear_left:shear_right+1], pressure[shear_left:shear_right+1], peep, vols[shear_left:shear_right+1], dt)
     pred = np.append([np.nan] * shear_left, pred)
-    diff_pred_real = 0
-    for i in range(shear_left+2, shear_right):
-        pred_auc = simps(pred[i-2:i], dx=dt)
-        real_auc = simps(flow[i-2:i], dx=dt)
-        diff_pred_real += abs(pred_auc - real_auc)
+    pred_auc = simps(pred[shear_left:shear_right+1], dx=dt)
+    real_auc = simps(flow[shear_left:shear_right+1], dx=dt)
 
-    if diff_pred_real < auc_thresh:
+    # vast majority of breaths never make it past this step. Most of the results returned by
+    # Kannangara algorithm are just flow targeted least squares approximations
+    if np.abs(real_auc - pred_auc) / real_auc <= auc_thresh:
+        # return previously calculated compliance and resistance. Don't recalculate from flow
+        # start to x0. Kannangara uses same method in his code
         return comp, res, resid, 1
 
     if debug:
@@ -203,7 +210,7 @@ def perform_algo(flow, vols, pressure, x0, peep, auc_thresh, debug=False):
 
         # step 6 single compartment refitting
         vols_recon = np.array([0] + [simps(flow_recon[:i], dx=dt) for i in range(2, len(flow_recon)+1)])
-        comp, res, resid = least_squares_flow_fit(flow_recon, vols_recon, pressure, peep)
+        comp, res, resid = least_squares_flow_fit(flow_recon, vols_recon, pressure, peep, dt)
         return comp, res, resid, 0
 
     # Steps 7a-b breaths with early asynchrony
@@ -242,13 +249,13 @@ def perform_algo(flow, vols, pressure, x0, peep, auc_thresh, debug=False):
                 plt.legend()
                 plt.show()
 
-            vols_recon = np.array([0] + [simps(flow_recon[:i], dx=dt) for i in range(2, len(flow_recon)+1)])
+            vols_recon = calc_volumes(flow_recon, dt)
             if len(flow_recon[shear_left:new_intercept+1]) < 3:
                 return np.nan, np.nan, np.nan, 6
-            pred, comp, res, resid = get_predicted_flow_waveform(flow_recon[shear_left:shear_right+1], pressure[shear_left:shear_right+1], peep, vols_recon[shear_left:shear_right+1])
+            pred, comp, res, resid = get_predicted_flow_waveform(flow_recon[shear_left:shear_right+1], pressure[shear_left:shear_right+1], peep, vols_recon[shear_left:shear_right+1], dt)
             pred = np.append([np.nan] * shear_left, pred)
             flow = flow_recon
-        comp, res, resid = least_squares_flow_fit(flow_recon, vols_recon, pressure, peep)
+        comp, res, resid = least_squares_flow_fit(flow_recon, vols_recon, pressure, peep, dt)
         return comp, res, resid, 0
 
     # Step 7c breaths where linear extrapolation not possible
@@ -285,8 +292,8 @@ def perform_algo(flow, vols, pressure, x0, peep, auc_thresh, debug=False):
             plt.legend()
             plt.show()
 
-        vols_recon = np.array([0] + [simps(flow_recon[:i], dx=dt) for i in range(2, len(flow_recon)+1)])
-        comp, res, resid = least_squares_flow_fit(flow_recon, vols_recon, pressure[:len(flow_recon)], peep)
+        vols_recon = calc_volumes(flow_recon, dt)
+        comp, res, resid = least_squares_flow_fit(flow_recon[:x0], vols_recon[:x0], pressure[:x0], peep, dt)
         return comp, res, resid, 0
 
     # XXX This corner case has happened in the following scenarios

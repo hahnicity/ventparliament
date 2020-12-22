@@ -76,7 +76,9 @@ class FileCalculations(object):
             raise Exception('algorithms_to_use var must either be a list of algos to use or "all"')
         else:
             self.algorithms_to_use = algorithms_to_use
-        self.algos_unavailable_for_pc_prvc = ['iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'vicario_co', 'vicario_co_insp', 'major', 'polynomial']
+        # XXX add all pressure-predicting least squares methods here.
+        self.algos_unavailable_for_pc_prvc = ['iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'major', 'polynomial']
+        # XXX need to add flow-predicting least squares methods.
         self.algos_unavailable_for_vc = ['kannangara']
         self.extra_breath_info = extra_breath_info
         self.filename = filename
@@ -121,8 +123,10 @@ class FileCalculations(object):
         # this is the number of iterations to run brunner's algo for
         self.brunner_iters = kwargs.get('brunner_iters', 2)
         # this is the auc threshold to determine if a breath is asynchronous or not
-        # for the Kannangara algo
-        self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.05)
+        # for the Kannangara algo. This is determined as the fraction of difference
+        # between the predicted flow waveform using least squares, and the actual
+        # observed flow waveform.
+        self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.001)
         # lourens tc to use. Options available are any percentage between 1 and 100
         self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 75)
         # number of iters to run mipr for
@@ -360,10 +364,10 @@ class FileCalculations(object):
         """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
-        flow = breath['flow']
+        flow = np.array(breath['flow']) / 60.0
         peep = self._get_median_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
-        sols = kannangara(flow, vols, breath['pressure'], bm.x0_index, peep, self.kannangara_thresh)
+        sols = kannangara(flow, vols, breath['pressure'], bm.x0_index, peep, self.dt, self.kannangara_thresh)
         # return compliance only
         return sols[0]
 
