@@ -14,10 +14,11 @@ from parliament.other_calcs import (
     al_rawas_expiratory_const,
     brunner,
     calc_volumes,
-    expiratory_least_squares,
+    ft_inspiratory_least_squares,
     howe_expiratory_least_squares,
-    inspiratory_least_squares,
     lourens_time_const,
+    pt_expiratory_least_squares,
+    pt_inspiratory_least_squares,
     vicario_nieap
 )
 from parliament.polynomial_model import perform_polynomial_model
@@ -53,12 +54,11 @@ class FileCalculations(object):
         """
         self.algo_mapping = {
             "al_rawas": self.al_rawas,
-            "exp_least_squares": self.exp_least_squares,
-            "howe_least_squares": self.howe_least_squares,
+            'ft_insp_lstsq': self.ft_inspiratory_least_squares,
+            "howe_lstsq": self.howe_least_squares,
             'iimipr': self.iimipr,
             'iipr': self.iipr,
             'iipredator': self.iipredator,
-            "insp_least_squares": self.insp_least_squares,
             "kannangara": self.kannangara,
             # XXX mccay is currently working from a software perspective but the results are off.
             #'mccay': self.mccay,
@@ -66,6 +66,8 @@ class FileCalculations(object):
             'mipr': self.mipr,
             'polynomial': self.polynomial,
             'predator': self.predator,
+            "pt_exp_lstsq": self.exp_least_squares,
+            "pt_insp_lstsq": self.insp_least_squares,
             "vicario_co": self.vicario_constrained,
             "vicario_co_insp": self.vicario_constrained_insp_only,
             "vicario_nieap": self.vicario_nieap,
@@ -126,7 +128,7 @@ class FileCalculations(object):
         # for the Kannangara algo. This is determined as the fraction of difference
         # between the predicted flow waveform using least squares, and the actual
         # observed flow waveform.
-        self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.001)
+        self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.005)
         # lourens tc to use. Options available are any percentage between 1 and 100
         self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 75)
         # number of iters to run mipr for
@@ -185,7 +187,7 @@ class FileCalculations(object):
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
-        pressure = breath['pressure']
+        pressure = np.array(breath['pressure'])
         peep = self._get_median_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
         plat, compliance, res, K, residual = func(
@@ -202,7 +204,7 @@ class FileCalculations(object):
         flow = np.array(breath['flow']) / 60
         peep = self._get_median_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
-        plat, comp, res, K, resid = inspiratory_least_squares(
+        plat, comp, res, K, resid = pt_inspiratory_least_squares(
             flow, vols, reconstructed_pressure, bm.x0_index, self.dt, peep, bm.tvi
         )
         return comp
@@ -259,6 +261,14 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         return self._perform_least_squares(breath_idx, expiratory_least_squares)
+
+    def ft_inspiratory_least_squares(self, breath_idx):
+        """
+        Perform flow-targeted least squares on inspiratory waveform
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        return self._perform_least_squares(breath_idx, ft_inspiratory_least_squares)
 
     def howe_least_squares(self, breath_idx):
         """
@@ -354,7 +364,7 @@ class FileCalculations(object):
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
-        return self._perform_least_squares(breath_idx, inspiratory_least_squares)
+        return self._perform_least_squares(breath_idx, pt_inspiratory_least_squares)
 
     def kannangara(self, breath_idx):
         """

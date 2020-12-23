@@ -15,7 +15,7 @@ like a second order polynomial equation.
 import numpy as np
 from scipy.integrate import simps
 
-from parliament.other_calcs import inspiratory_least_squares as least_squares_method
+from parliament.other_calcs import pt_inspiratory_least_squares as least_squares_method
 
 
 def get_predicted_pressure_waveform(flow, pressure, peep, x0, tvi, vols):

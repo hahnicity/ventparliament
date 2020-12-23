@@ -5,6 +5,17 @@ from scipy.integrate import simps
 from scipy.stats import linregress
 
 
+def _perform_least_squares(a, pressure, tvi, peep):
+    """
+    Helper function for performing least squares regression with single chamber model
+    """
+    least_square_result = np.linalg.lstsq(a, np.array(pressure))
+    solution = least_square_result[0]
+    elastance = solution[0]
+    plat = tvi * elastance + peep
+    return plat, 1 / elastance, solution[1], solution[2], least_square_result[1]
+
+
 def calc_volumes(flow, dt):
     """
     Calculate volume for flow wave using simpsons rule. Here we use a streaming version of simpsons
@@ -142,47 +153,40 @@ def brunner(tve, e_time, f_min, iters):
     return bru
 
 
-def perform_least_squares(a, pressure, tvi, peep):
+def ft_inspiratory_least_squares(flow, vols, pressure, x0_index, peep, dt, tvi):
     """
-    Helper function for performing least squares regression with single chamber model
-    """
-    least_square_result = np.linalg.lstsq(a, np.array(pressure))
-    solution = least_square_result[0]
-    elastance = solution[0]
-    plat = tvi * elastance + peep
-    return plat, 1 / elastance, solution[1], solution[2], least_square_result[1]
+    Volume targeted least squares. Perform least squares approximation of R and E the way
+    that Kannangara does it in his paper. Only use the inspiratory limb
 
+    Kannangara DO, Newberry F, Howe S, Major V, Redmond D, Szlavecs A, Chiew YS, Pretty C, Benyó B,
+    Shaw GM, Chase JG. Estimating the true respiratory mechanics during asynchronous pressure
+    controlled ventilation. Biomedical Signal Processing and Control. 2016 Sep 1;30:70-8.
 
-def expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
-    """
-    Calculate compliance, resistance, and K via standard single chamber
-    model equation. Only looks at expiratory part of breath:
-
-    This method was exemplified by:
-
-    Van Drunen EJ, Chiew YS, Chase JG, Shaw GM, Lambermont B, Janssen N, Damanhuri NS, Desaive T.
-    Expiratory model-based method to monitor ARDS disease state. Biomedical engineering online.
-    2013 Dec 1;12(1):57.
+    V_dot = (pressure - peep) / R - E*V / R
 
     :param flow: array vals of flow measurements in L/s
-    :param vols: breath volume in L per observation of the flow array
+    :param vols: volumes of air inspired in L
     :param pressure: array vals of pressure obs
-    :param x0_index: index where flow crosses 0
-    :param dt: time delta between obs
+    :param x0_index: Index where flow crosses to expiratory phase
     :param peep: positive end expiratory pressure
-    :param tvi: TVi in L
+    :param dt: time delta between obs
 
-    :returns tuple: plateau pressure, compliance, resistance, K, residual
+    :returns tuple: plat, compliance, resistance, None, residual
+
+    Returns None in 4th arg to maintain compatibility with other least squares methods
     """
-    # there was no identifiable expiratory location
-    if x0_index > len(flow):
-        return (np.nan, np.nan, np.nan, np.nan, np.nan)
-
-    vols = vols[x0_index-1:]
-    flow = flow[x0_index-1:]
-    pressure = pressure[x0_index-1:]
-    a = np.array([vols, flow, [1]*len(flow)]).transpose()
-    return perform_least_squares(a, pressure, tvi, peep)
+    end_idx = x0_index if x0_index <= len(flow) else len(flow)
+    a = np.array([pressure[:end_idx] - peep, vols[:end_idx]]).transpose()
+    least_square_result = np.linalg.lstsq(a, flow[:end_idx])
+    solution = least_square_result[0]
+    resistance = 1 / solution[0]
+    elastance = -1 * solution[1] * resistance
+    try:
+        residual = least_square_result[1][0]
+    except IndexError:
+        residual = np.nan
+    plat = tvi * elastance + peep
+    return plat, 1 / elastance, resistance, None, residual
 
 
 def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
@@ -216,35 +220,7 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
     pressure = np.array(pressure[start_idx:])
     pressure = pressure - pressure[0]
     a = np.array([vols, flow, [1]*len(flow)]).transpose()
-    return perform_least_squares(a, pressure, tvi, peep)
-
-
-def inspiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
-    """
-    Calculate compliance, resistance, and K via standard single chamber
-    model equation. Only looks at inspiratory part of breath:
-
-    P_vent = V(t)E + V_dot(t)R + K
-
-    where K is some constant that is defined by PEEP + PEEPi + P_0
-
-    This method is will work in more situations than other methods will,
-    but it's also going to be the least accurate, especially when a patient
-    is exerting force of their muscles
-
-    :param flow: array vals of flow measurements in L/s
-    :param vols: breath volume in L per observation of the flow array
-    :param pressure: array vals of pressure obs
-    :param x0_index: index where flow crosses 0
-    :param dt: time delta between obs
-    :param peep: positive end expiratory pressure
-    :param tvi: TVi in L
-
-    :returns tuple: plateau pressure, compliance, resistance, K, residual
-    """
-    end_idx = x0_index if x0_index <= len(flow) else len(flow)
-    a = np.array([vols[:end_idx], flow[:end_idx], [1]*end_idx]).transpose()
-    return perform_least_squares(a, pressure[:end_idx], tvi, peep)
+    return _perform_least_squares(a, pressure, tvi, peep)
 
 
 def lourens_time_const(flow, tve, x0_index, dt, percentage_target):
@@ -284,6 +260,66 @@ def lourens_time_const(flow, tve, x0_index, dt, percentage_target):
             volume_idx = idx
 
     return (tve*(percentage_target/100)) / (flow[volume_idx]-flow[-1]) if volume_idx is not None else np.nan
+
+
+def pt_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
+    """
+    Pressure targeted least squares. Calculate compliance, resistance, and K via standard
+    single chamber model equation. Only looks at expiratory part of breath:
+
+    This method was exemplified by:
+
+    Van Drunen EJ, Chiew YS, Chase JG, Shaw GM, Lambermont B, Janssen N, Damanhuri NS, Desaive T.
+    Expiratory model-based method to monitor ARDS disease state. Biomedical engineering online.
+    2013 Dec 1;12(1):57.
+
+    :param flow: array vals of flow measurements in L/s
+    :param vols: breath volume in L per observation of the flow array
+    :param pressure: array vals of pressure obs
+    :param x0_index: index where flow crosses 0
+    :param dt: time delta between obs
+    :param peep: positive end expiratory pressure
+    :param tvi: TVi in L
+
+    :returns tuple: plateau pressure, compliance, resistance, K, residual
+    """
+    # there was no identifiable expiratory location
+    if x0_index >= len(flow)-1:
+        return (np.nan, np.nan, np.nan, np.nan, np.nan)
+
+    vols = vols[x0_index-1:]
+    flow = flow[x0_index-1:]
+    pressure = pressure[x0_index-1:]
+    a = np.array([vols, flow, [1]*len(flow)]).transpose()
+    return _perform_least_squares(a, pressure, tvi, peep)
+
+
+def pt_inspiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
+    """
+    Pressure targeted least squares. Calculate compliance, resistance, and K via standard
+    single chamber model equation. Only looks at inspiratory part of breath:
+
+    P_vent = V(t)E + V_dot(t)R + K
+
+    where K is some constant that is defined by PEEP + PEEPi + P_0
+
+    This method is will work in more situations than other methods will,
+    but it's also going to be the least accurate, especially when a patient
+    is exerting force of their muscles
+
+    :param flow: array vals of flow measurements in L/s
+    :param vols: breath volume in L per observation of the flow array
+    :param pressure: array vals of pressure obs
+    :param x0_index: index where flow crosses 0
+    :param dt: time delta between obs
+    :param peep: positive end expiratory pressure
+    :param tvi: TVi in L
+
+    :returns tuple: plateau pressure, compliance, resistance, K, residual
+    """
+    end_idx = x0_index if x0_index <= len(flow) else len(flow)
+    a = np.array([vols[:end_idx], flow[:end_idx], [1]*end_idx]).transpose()
+    return _perform_least_squares(a, pressure[:end_idx], tvi, peep)
 
 
 def vicario_nieap(flow, pressure, x0_index, peep, tvi, tau):

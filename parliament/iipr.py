@@ -10,7 +10,7 @@ from copy import copy
 import numpy as np
 from scipy.integrate import simps
 
-from parliament.other_calcs import calc_volumes, inspiratory_least_squares
+from parliament.other_calcs import calc_volumes, pt_inspiratory_least_squares
 
 IMPLAUSIBLE_PRESSURE = -1000
 
@@ -428,7 +428,7 @@ def perform_iipr_algo(flow, vols, pressure, x0, peep, dt):
     recon, code = perform_iipr_pressure_reconstruction(flow, vols, pressure, x0, peep, dt)
     if code in [2, 3, 4]:
         # just supply 0 as tvi because it doesnt matter for this func
-        plat, comp, resist, K, residual = inspiratory_least_squares(flow, vols, pressure, x0, dt, peep, 0)
+        plat, comp, resist, K, residual = pt_inspiratory_least_squares(flow, vols, pressure, x0, dt, peep, 0)
     if code in [0, 5]:
-        plat, comp, resist, K, residual = inspiratory_least_squares(flow, vols, recon, x0, dt, peep, 0)
+        plat, comp, resist, K, residual = pt_inspiratory_least_squares(flow, vols, recon, x0, dt, peep, 0)
     return comp, resist, residual, code
