@@ -72,6 +72,7 @@ class FileCalculations(object):
             "vicario_co_insp": self.vicario_constrained_insp_only,
             "vicario_nieap": self.vicario_nieap,
         }
+        self.algos_with_tc = ['al_rawas', 'vicario_nieap']
         if algorithms_to_use == 'all' or 'all' in algorithms_to_use:
             self.algorithms_to_use = list(self.algo_mapping.keys())
         elif not isinstance(algorithms_to_use, list):
@@ -88,8 +89,6 @@ class FileCalculations(object):
             # XXX not sure where these params come from. But I used them awhile back
             self.mccay_interface = McCayInterface([.5, 15.], .01, True)
         self.peeps_to_use = peeps_to_use
-        self.results = []
-        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'artifact'] + self.algorithms_to_use
         self.breath_data = list(read_processed_file(filename))
         if len(self.breath_data) == 0:
             raise Exception('ventmap found 0 breaths in file: {}! Is this an error?'.format(filename))
@@ -141,17 +140,35 @@ class FileCalculations(object):
         # is not linear anymore. Brunner has a weird non-converging iters term, and lourens
         # you need to pick which time const you want to use, which can vary from patient to
         # patient and breath to breath.
-        self.tc_algo = {
+        self.tc_algo_mapping = {
             'al_rawas': self.al_rawas_tau,
             'brunner': self.brunner,
             'lourens': self.lourens_tau
-        }[kwargs.get('tc_algo', 'al_rawas')]
+        }
+        if not kwargs.get('tc_algos'):
+            self.tc_algos = ['al_rawas']
+        elif kwargs.get('tc_algos') == ['all']:
+            self.tc_algos = list(self.tc_algo_mapping.keys())
+        elif isinstance(kwargs.get('tc_algos'), list):
+            self.tc_algos = kwargs.get('tc_algos')
+        tc_algo_prefixes = {'al_rawas': 'ar', 'brunner': 'bru', 'lourens': 'lren'}
         # this is the m_index for vicario. This is another const that is supposed to
         # be found by sensitivity analysis, but here we just set to a const
         self.vicario_co_m_idx = kwargs.get('vicario_co_m_idx', 15)
         # because vicario constrained can sometimes fail miserably, filter vicario
         # breaths above this residual in vicario co
         self.vicario_co_residual = kwargs.get('vicario_co_residual', 200)
+
+        # setup results data list
+        self.results = []
+        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'artifact']
+        non_algo_cols = len(self.results_cols)
+        for algo in self.algorithms_to_use:
+            if algo in self.algos_with_tc:
+                self.results_cols += [algo + '_' + tc_algo_prefixes[tc] for tc in self.tc_algos]
+            else:
+                self.results_cols += [algo]
+        self.algos_used = self.results_cols[non_algo_cols:]
 
     def _calc_breath_volume(self, breath_idx):
         """
@@ -209,12 +226,33 @@ class FileCalculations(object):
         )
         return comp
 
-    def al_rawas(self, breath_idx):
+    def perform_algo_with_tc(self, breath_idx, algo):
+        """
+        Perform some algorithm that uses a time constant. Using this function allows us to
+        use multiple time const methods with the same algorithm and aggregate their results
+        in one location.
+        For example if we were to run al_rawas we could do `self.perform_algo_with_tc(breath_idx, self.al_rawas)`
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        :returns list: [<compliance results with tc_1>, <compliance results with tc_2>, ...]
+        """
+        tc_results = []
+        for tc_algo in self.tc_algos:
+            tau = self.tc_algo_mapping[tc_algo](breath_idx)
+            tc_results.append(algo(breath_idx, tau))
+        return tc_results
+
+    def al_rawas(self, breath_idx, tau):
+        """
+        Perform Al-Rawas' algorithm for finding compliance.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        :param tau: Expiratory time constant for our breath
+        """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         vols = self._calc_breath_volume(breath_idx)
-        tau = self.tc_algo(breath_idx)
         tau, plat, comp, res = al_rawas_calcs(
             flow_l_s,
             vols,
@@ -260,7 +298,7 @@ class FileCalculations(object):
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
-        return self._perform_least_squares(breath_idx, expiratory_least_squares)
+        return self._perform_least_squares(breath_idx, pt_expiratory_least_squares)
 
     def ft_inspiratory_least_squares(self, breath_idx):
         """
@@ -515,12 +553,15 @@ class FileCalculations(object):
             return np.nan
         return 1 / elas
 
-    def vicario_nieap(self, breath_idx):
+    def vicario_nieap(self, breath_idx, tau):
         """
         Perform vicario's method for NonInvasive Estimation of Alveolar Pressure (NIEAP).
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
+        :param tau: Expiratory time constant for our breath
         """
+        if tau is np.nan:
+            return np.nan
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
@@ -529,11 +570,8 @@ class FileCalculations(object):
         # Have option of using a variety of time constants, but lets just use al-rawas for now.
         # We can add configurability in the future.
         peep = self._get_median_peep(breath_idx)
-        tau = self.tc_algo(breath_idx)
-        if tau is not np.nan:
-            plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
-            return comp
-        return np.nan
+        plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
+        return comp
 
     def analyze_breath(self, breath_idx):
         """
@@ -574,7 +612,12 @@ class FileCalculations(object):
             elif ventmode == 'vc' and algo in self.algos_unavailable_for_vc:
                 breath_results.append(np.nan)
                 continue
-            breath_results.append(self.algo_mapping[algo](breath_idx))
+
+            func = self.algo_mapping[algo]
+            if algo in self.algos_with_tc:
+                breath_results.extend(self.perform_algo_with_tc(breath_idx, func))
+            else:
+                breath_results.append(func(breath_idx))
         return breath_results
 
     def analyze_file(self):

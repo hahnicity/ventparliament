@@ -164,7 +164,7 @@ class ResultsContainer(object):
         X-axis is MAD and Y-axis is std.
         """
         mad_std, algos_in_order = self.preprocess_mad_std_in_df(df)
-        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Join$']
+        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$', '$\dag$']
         colors = [cc.cm.glasbey(i) for i in range(len(self.algos_used))]
         algo_dict = {algo: {'m': markers[i], 'c': colors[i]} for i, algo in enumerate(self.algos_used)}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
@@ -250,7 +250,7 @@ def main():
     parser.add_argument('experiment_name')
     parser.add_argument('--only-patient', help='only run results for specific patient', nargs='*')
     parser.add_argument('--algos', nargs="*", default='all')
-    parser.add_argument('--tc-algo', choices=['al_rawas', 'lourens', 'brunner'], default='al_rawas')
+    parser.add_argument('--tc-algos', choices=['al_rawas', 'lourens', 'brunner', 'all'], nargs='*')
     parser.add_argument('-ltc', '--lourens-tc-choice', type=int, default=75)
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
 
@@ -268,7 +268,7 @@ def main():
             if args.only_patient and patient_id not in args.only_patient:
                 continue
             extra = pd.read_pickle(str(file).replace('raw.npy', 'extra.pkl'))
-            calcs = FileCalculations(str(file), args.algos, 9, extra, tc_algo=args.tc_algo, lourens_tc_choice=args.lourens_tc_choice)
+            calcs = FileCalculations(str(file), args.algos, 9, extra, tc_algos=args.tc_algos, lourens_tc_choice=args.lourens_tc_choice)
             try:
                 calcs.analyze_file()
             except Exception as err:
@@ -278,15 +278,14 @@ def main():
                 print(err)
                 return
             results.add_results_df(patient_id, calcs.results)
-    algos_used = list(set(calcs.results.columns).intersection(set(list(calcs.algo_mapping.keys()))))
-    results.collate_data(algos_used)
+    results.collate_data(calcs.algos_used)
     results.save_results()
 
 #    # XXX debug
     import matplotlib.pyplot as plt
     patient_results = results.proc_results
     for pt, df in results.proc_results.groupby('patient_id'):
-        df[algos_used].plot(title=pt, figsize=(3*8, 4*3), fontsize=6, colormap=cc.cm.glasbey)
+        df[calcs.algos_used].plot(title=pt, figsize=(3*8, 4*3), fontsize=6, colormap=cc.cm.glasbey)
         gt = patient_results['gold_stnd_compliance']
         plt.plot(gt, label='gt')
         plt.show()
