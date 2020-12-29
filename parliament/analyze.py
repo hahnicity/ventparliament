@@ -9,18 +9,7 @@ from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 from parliament.iipr import perform_iipr_algo, perform_iipr_pressure_reconstruction
 from parliament.mccay.interface import McCayInterface
 from parliament.mipr import perform_mipr
-from parliament.other_calcs import (
-    al_rawas_calcs,
-    al_rawas_expiratory_const,
-    brunner,
-    calc_volumes,
-    ft_inspiratory_least_squares,
-    howe_expiratory_least_squares,
-    lourens_time_const,
-    pt_expiratory_least_squares,
-    pt_inspiratory_least_squares,
-    vicario_nieap
-)
+from parliament.other_calcs import *
 from parliament.polynomial_model import perform_polynomial_model
 from parliament.predator import max_pool_pressure_reconstruction, perform_pressure_reconstruction as predator_reconstruction
 from parliament.pressure_ctrl_correction import perform_algo as kannangara
@@ -143,6 +132,7 @@ class FileCalculations(object):
         self.tc_algo_mapping = {
             'al_rawas': self.al_rawas_tau,
             'brunner': self.brunner,
+            'ikeda': self.ikeda_tau,
             'lourens': self.lourens_tau
         }
         if not kwargs.get('tc_algos'):
@@ -395,6 +385,19 @@ class FileCalculations(object):
         else:
             self.ii_reconstructed_pressures[breath_idx] = pressure
             return pressure
+
+    def ikeda_tau(self, breath_idx):
+        """
+        Get tau_e using Ikeda's method (very similar to Lourens method).
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata[breath_idx]
+        flow = np.array(breath['flow']) / 60
+        tvi = bm.tvi / 1000
+        tve = bm.tve / 1000
+        return ikeda_time_const(flow, tvi, tve, self.dt)
 
     def insp_least_squares(self, breath_idx):
         """

@@ -223,6 +223,43 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
     return _perform_least_squares(a, pressure, tvi, peep)
 
 
+def ikeda_time_const(flow, tvi, tve, dt):
+    """
+    Calculate tau_e based on Ikeda's 2019 paper:
+
+    Reference value for expiratory time constant calculated from the maximal expiratory
+    flow-volume curve
+
+    :param flow: numpy array vals of flow measurements in L/s
+    :param tvi: inspiratory tidal volume in L
+    :param tve: expiratory tidal volume in L
+    :param dt: time delta between obs
+    """
+    vols = calc_volumes(flow, dt)
+    # find MEF50 and MEF25
+    mef50 = None
+    mef25 = None
+    # just uses a derivative of lourens tc logic
+    for idx, v in enumerate(vols):
+        # Note we dont use the idx+1 indexing here because we assume
+        # that the volume expired was passed in between the last obs and
+        # the current obs
+        if v >= tvi * .5 and mef50 is None:
+            # use +1 because we start from index 1 on vols
+            mef50 = flow[idx]
+        # mef25 is a bit misleadingly labeled, but it really corresponds with 75% volume
+        if v >= tvi * .75 and mef25 is None:
+            mef25 = flow[idx]
+            # if we've made it here then break because mef50 will already be done
+            break
+
+    if mef50 == mef25:
+        # breath is too short to get a reasonable result
+        return np.nan
+
+    return 0.25 * tve /  (mef50 - mef25)
+
+
 def lourens_time_const(flow, tve, x0_index, dt, percentage_target):
     """
     Calculate Lourens time constant for patients. Although Lourens used 4 fixed percentage
@@ -252,12 +289,10 @@ def lourens_time_const(flow, tve, x0_index, dt, percentage_target):
 
     volume_target = tve * (percentage_target/100)
     volume_idx = None
-    for idx, v in enumerate(vols[1:]):
-        # Note we dont use the idx+1 indexing here because we assume
-        # that the volume expired was passed in between the last obs and
-        # the current obs
+    for idx, v in enumerate(vols):
         if v >= volume_target:
             volume_idx = idx
+            break
 
     return (tve*(percentage_target/100)) / (flow[volume_idx]-flow[-1]) if volume_idx is not None else np.nan
 

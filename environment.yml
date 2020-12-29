@@ -13,8 +13,9 @@ dependencies:
   - jupyter
   - pip
   - pip:
-    - statsmodels
     - colorcet
+    - prettytable
+    - statsmodels
     - ventmap>=1.4.7
 channels:
   - conda-forge
