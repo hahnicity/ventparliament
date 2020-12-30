@@ -2,6 +2,7 @@ import math
 
 import numpy as np
 from scipy.integrate import simps
+from scipy.optimize import curve_fit
 from scipy.stats import linregress
 
 
@@ -140,7 +141,7 @@ def brunner(tve, e_time, f_min, iters):
     :param f_min: abs value of maximum expiratory flow rate in L/s
     :param iters: number iterations to perform on the algorithm. We suggest sticking to 2 iters
     """
-    if f_min == 0 or tve == 0 or e_time == 0:
+    if f_min <= 0 or tve == 0 or e_time == 0:
         return np.nan
 
     bru = tve / f_min
@@ -227,8 +228,9 @@ def ikeda_time_const(flow, tvi, tve, dt):
     """
     Calculate tau_e based on Ikeda's 2019 paper:
 
-    Reference value for expiratory time constant calculated from the maximal expiratory
-    flow-volume curve
+    Ikeda T, Yamauchi Y, Uchida K, Oba K, Nagase T, Yamada Y. Reference value for expiratory
+    time constant calculated from the maximal expiratory flow-volume curve.
+    BMC pulmonary medicine. 2019 Dec;19(1):1-9.
 
     :param flow: numpy array vals of flow measurements in L/s
     :param tvi: inspiratory tidal volume in L
@@ -236,7 +238,6 @@ def ikeda_time_const(flow, tvi, tve, dt):
     :param dt: time delta between obs
     """
     vols = calc_volumes(flow, dt)
-    # find MEF50 and MEF25
     mef50 = None
     mef25 = None
     # just uses a derivative of lourens tc logic
@@ -383,3 +384,72 @@ def vicario_nieap(flow, pressure, x0_index, peep, tvi, tau):
     compliance = 1 / elastance
     plat = tvi * elastance + peep
     return plat, compliance, resistance
+
+
+def wiriyaporn_time_const_exp(flow, x0_index, dt):
+    """
+    Calculate the expiratory time constant based on Wiriyaporn's 2016 paper:
+
+    Wiriyaporn D, Wang L, Aboussouan LS. Expiratory time constant and sleep apnea severity
+    in the overlap syndrome. Journal of Clinical Sleep Medicine. 2016 Mar 15;12(3):327-32.
+
+    Solve using scipy.optimize.curve_fit.
+
+    :param flow: array vals of flow measurements in L/s
+    :param x0_index: index where flow crosses 0
+    :param dt: time delta between obs
+    """
+    min_flow_idx = np.argmin(flow)
+    # second cond means exp flow <= 0.22 seconds
+    if x0_index >= len(flow)-1 or len(flow[min_flow_idx:]) <= int(0.22 / dt):
+        return np.nan
+
+    exp_flow = np.abs(flow[min_flow_idx:])
+    t = np.arange(dt, dt*len(exp_flow), .2)
+    ydata = np.abs([exp_flow[int(v/dt)] for v in t])
+    f = lambda x, tau: exp_flow[0]*np.exp(-x/tau)
+    result = curve_fit(f, t, ydata)
+    tau = result[0][0]
+    pred = f(t, tau)
+    r2 = 1 - np.sum((ydata-pred)**2) / np.sum((ydata - np.mean(ydata))**2)
+    if r2 < 0.95:
+        return np.nan
+    return tau
+
+
+def wiriyaporn_time_const_linear(flow, x0_index, dt):
+    """
+    Calculate the expiratory time constant based on Wiriyaporn's 2016 paper:
+
+    Wiriyaporn D, Wang L, Aboussouan LS. Expiratory time constant and sleep apnea severity
+    in the overlap syndrome. Journal of Clinical Sleep Medicine. 2016 Mar 15;12(3):327-32.
+
+    Here we solve their exponential fit eq by linearizing the equation and then solving with
+    least squares fit. Just wanted to do this to provide alternative method in case exponential
+    solver fails
+
+    :param flow: array vals of flow measurements in L/s
+    :param x0_index: index where flow crosses 0
+    :param dt: time delta between obs
+    """
+    min_flow_idx = np.argmin(flow)
+    # second cond means exp flow <= 0.22 seconds
+    if x0_index >= len(flow)-1 or len(flow[min_flow_idx:]) <= int(0.22 / dt):
+        return np.nan
+
+    min_flow_idx = np.argmin(flow)
+    exp_flow = np.abs(flow[min_flow_idx:])
+    t = np.arange(dt, dt*len(exp_flow), .2)
+    # just linearize the eq instead of fitting an exponential decay
+    target = [-v / np.log(exp_flow[int(v/dt)]/exp_flow[0]) for v in t]
+    a = np.array([[1] * len(target)]).T
+    result = np.linalg.lstsq(a, target)
+
+    # now figure out the residual using the original eq.
+    tau = result[0][0]
+    f = lambda x, tau: exp_flow[0]*np.exp(-x/tau)
+    ydata = np.abs([exp_flow[int(v/dt)] for v in t])
+    r2 = 1 - np.sum((ydata-f(t, tau))**2)/np.sum((ydata-np.mean(ydata))**2)
+    if r2 > 0.05:
+        return np.nan
+    return tau

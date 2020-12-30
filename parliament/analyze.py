@@ -118,7 +118,7 @@ class FileCalculations(object):
         # observed flow waveform.
         self.kannangara_thresh = kwargs.get('kannangara_thresh', 0.005)
         # lourens tc to use. Options available are any percentage between 1 and 100
-        self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 75)
+        self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 50)
         # number of iters to run mipr for
         self.mipr_iters = kwargs.get('mipr_iters', 20)
         # This is a constant used in PREDATOR to determine how many breaths backward we
@@ -133,7 +133,8 @@ class FileCalculations(object):
             'al_rawas': self.al_rawas_tau,
             'brunner': self.brunner,
             'ikeda': self.ikeda_tau,
-            'lourens': self.lourens_tau
+            'lourens': self.lourens_tau,
+            'wiri': self.wiriyaporn_tau,
         }
         if not kwargs.get('tc_algos'):
             self.tc_algos = ['al_rawas']
@@ -141,7 +142,7 @@ class FileCalculations(object):
             self.tc_algos = list(self.tc_algo_mapping.keys())
         elif isinstance(kwargs.get('tc_algos'), list):
             self.tc_algos = kwargs.get('tc_algos')
-        tc_algo_prefixes = {'al_rawas': 'ar', 'brunner': 'bru', 'lourens': 'lren'}
+        tc_algo_prefixes = {'al_rawas': 'ar', 'brunner': 'bru', 'lourens': 'lren', 'wiri': 'wri', 'ikeda': 'ikd'}
         # this is the m_index for vicario. This is another const that is supposed to
         # be found by sensitivity analysis, but here we just set to a const
         self.vicario_co_m_idx = kwargs.get('vicario_co_m_idx', 15)
@@ -575,6 +576,20 @@ class FileCalculations(object):
         peep = self._get_median_peep(breath_idx)
         plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
         return comp
+
+    def wiriyaporn_tau(self, breath_idx):
+        """
+        Compute exp const using Wiriyaporn's method
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata[breath_idx]
+        flow_l_s = np.array(breath['flow']) / 60
+        try:
+            return wiriyaporn_time_const_exp(flow_l_s, bm.x0_index, self.dt)
+        except RuntimeError:  # exponential method fails
+            return wiriyaporn_time_const_linear(flow_l_s, bm.x0_index, self.dt)
 
     def analyze_breath(self, breath_idx):
         """
