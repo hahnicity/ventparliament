@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from scipy.integrate import simps
@@ -112,6 +114,15 @@ class FileCalculations(object):
         self.al_rawas_idx = kwargs.get('al_rawas_idx', 'median')
         # this is the number of iterations to run brunner's algo for
         self.brunner_iters = kwargs.get('brunner_iters', 2)
+        # fuzzy clustering alpha
+        self.fuzzy_clust_alpha = kwargs.get('fuzzy_clust_alpha', 0.8)
+        # min number obs we must have for fuzzy clustering
+        self.fuzzy_clust_min_obs = kwargs.get('fuzzy_clust_min_obs', 10)
+        # path to pickled fuzzy clustering filename
+        self.fuzzy_clust_cls = pd.read_pickle(kwargs.get('fuzzy_clust_path', str(Path(__file__).parent.joinpath('../dataset/processed_data/pickled_objs/gk.pkl').resolve())))
+        # which cluster to extract time const from. by default is 1, which is last cluster in
+        # expiratory phase and tends to have the longest exhalatory const.
+        self.fuzzy_clust_which_clust = kwargs.get('fuzzy_clust_which_clust', 0)
         # this is the auc threshold to determine if a breath is asynchronous or not
         # for the Kannangara algo. This is determined as the fraction of difference
         # between the predicted flow waveform using least squares, and the actual
@@ -132,6 +143,7 @@ class FileCalculations(object):
         self.tc_algo_mapping = {
             'al_rawas': self.al_rawas_tau,
             'brunner': self.brunner,
+            'fuzzy': self.fuzzy_clust_tau,
             'ikeda': self.ikeda_tau,
             'lourens': self.lourens_tau,
             'wiri': self.wiriyaporn_tau,
@@ -142,7 +154,7 @@ class FileCalculations(object):
             self.tc_algos = list(self.tc_algo_mapping.keys())
         elif isinstance(kwargs.get('tc_algos'), list):
             self.tc_algos = kwargs.get('tc_algos')
-        tc_algo_prefixes = {'al_rawas': 'ar', 'brunner': 'bru', 'lourens': 'lren', 'wiri': 'wri', 'ikeda': 'ikd'}
+        tc_algo_prefixes = {'al_rawas': 'ar', 'brunner': 'bru', 'lourens': 'lren', 'wiri': 'wri', 'ikeda': 'ikd', 'fuzzy': 'fuz'}
         # this is the m_index for vicario. This is another const that is supposed to
         # be found by sensitivity analysis, but here we just set to a const
         self.vicario_co_m_idx = kwargs.get('vicario_co_m_idx', 15)
@@ -298,6 +310,20 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         return self._perform_least_squares(breath_idx, ft_inspiratory_least_squares)
+
+    def fuzzy_clust_tau(self, breath_idx):
+        """
+        Get tau based on Babuska's fuzzy clustering algo
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        flow = np.array(breath['flow'])/60
+        vols = self._calc_breath_volume(breath_idx)
+        bm = self.breath_metadata[breath_idx]
+        return fuzzy_clustering_time_const(
+            flow, vols, bm.x0_index, self.fuzzy_clust_min_obs, self.fuzzy_clust_alpha, self.fuzzy_clust_cls
+        )[self.fuzzy_clust_which_clust]
 
     def howe_least_squares(self, breath_idx):
         """

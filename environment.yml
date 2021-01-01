@@ -14,6 +14,7 @@ dependencies:
   - pip
   - pip:
     - colorcet
+    - git+https://github.com/hahnicity/fuzzy-clustering.git
     - prettytable
     - statsmodels
     - ventmap>=1.4.7

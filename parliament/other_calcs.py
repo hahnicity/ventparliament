@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pandas as pd
 from scipy.integrate import simps
 from scipy.optimize import curve_fit
 from scipy.stats import linregress
@@ -190,6 +191,45 @@ def ft_inspiratory_least_squares(flow, vols, pressure, x0_index, peep, dt, tvi):
     return plat, 1 / elastance, resistance, None, residual
 
 
+def fuzzy_clustering_time_const(flow, vols, x0_index, min_n_obs, alpha, gk_cls):
+    """
+    Get exp. time const using fuzzy clustering and least squares
+
+    Babuška R, Alic L, Lourens MS, Verbraak AF, Bogaard J. Estimation of respiratory parameters
+    via fuzzy clustering. Artificial Intelligence in Medicine. 2001 Jan 1;21(1-3):91-105.
+
+    :param flow: array vals of flow measurements in L/s
+    :param vols: array of volumes in lung for the breath
+    :param x0_index: index where flow crosses 0
+    :param min_n_obs: minimum number obs we need in expiratory flow array to analyze breath
+    :param alpha: The alpha param used to make an alpha-cut. In the paper this is 0.8
+    :param gk_cls: Trained GK algo object.
+    """
+    # if flow never crosses 0 then quit
+    if x0_index >= len(flow)-1:
+        return np.nan
+
+    # the paper never states this, but our impl takes flow from min flow to end. Otherwise
+    # the time const may be lengthened.
+    min_f_idx = np.argmin(flow)
+    if len(flow[min_f_idx:]) < min_n_obs:
+        return np.nan
+
+    z = np.array([vols[min_f_idx:], flow[min_f_idx:]]).T
+    u = gk_cls.predict_proba(z)
+    tau_clust = []
+    for c_idx in range(u.shape[0]):
+        clust_members = z[u[c_idx] >= alpha]
+        # the eq in the paper is V + \tau*V_dot = 0
+        # so we shape it to be
+        # \tau*V_dot = -V
+        target = clust_members[:, 0]
+        a = np.expand_dims(clust_members[:, 1], axis=0).T
+        least_square_result = np.linalg.lstsq(a, -target)
+        tau_clust.append(least_square_result[0][0])
+    return tau_clust
+
+
 def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
     """
     Calculate compliance, resistance, and K via standard single chamber
@@ -212,7 +252,7 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
     :returns tuple: plateau pressure, compliance, resistance, K, residual
     """
     # there was no identifiable expiratory location
-    if x0_index > len(flow):
+    if x0_index >= len(flow)-1:
         return (np.nan, np.nan, np.nan, np.nan, np.nan)
 
     start_idx = x0_index - 1

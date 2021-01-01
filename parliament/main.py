@@ -366,7 +366,7 @@ def main():
     parser.add_argument('experiment_name')
     parser.add_argument('--only-patient', help='only run results for specific patient', nargs='*')
     parser.add_argument('--algos', nargs="*", default='all')
-    parser.add_argument('--tc-algos', choices=['al_rawas', 'brunner', 'ikeda', 'lourens', 'wiri', 'all'], nargs='*')
+    parser.add_argument('--tc-algos', choices=['al_rawas', 'brunner', 'fuzzy', 'ikeda', 'lourens', 'wiri', 'all'], nargs='*')
     parser.add_argument('-ltc', '--lourens-tc-choice', type=int, default=75)
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
 

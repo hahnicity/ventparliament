@@ -10,13 +10,17 @@ from pathlib import Path
 
 # this is from our private async detection repository. You are welcome to use other
 # methods to detect asynchronies. There are a number of machine learning methods
-# that are free and available for use.
+# that are free and available for use. Either way though, you will have access to the
+# asynchrony predictions in our dataset
 from algorithms.tor5 import detectPVI
+from fuzzy_clust_algos.gk import GK
 import numpy as np
 import pandas as pd
-
+from ventmap.breath_meta import get_production_breath_meta
 from ventmap.raw_utils import extract_raw, process_breath_file, read_processed_file
 from ventmap.SAM import check_if_plat_occurs
+
+from parliament.other_calcs import calc_volumes
 
 
 class Processing(object):
@@ -141,6 +145,40 @@ class Processing(object):
             elif not only_patient:
                 self.iterate_on_pt(rows)
 
+    def make_gk_clust(self, min_obs, only_patient):
+        """
+        Make GK clustering obj using Babuska's fuzzy clustering algo for the exp. curve only
+        """
+        z = []
+        for patient_dir in self.processed_data_dir.glob('*RPI*'):
+            patient_id = patient_dir.name
+            if only_patient and patient_id != only_patient:
+                continue
+            for filename in patient_dir.glob('*.raw.npy'):
+                gen = read_processed_file(str(filename.resolve()))
+                for breath in gen:
+                    flow = np.array(breath['flow'])/60
+                    bm = get_production_breath_meta(breath, to_series=True)
+                    if bm.x0_index >= len(flow)-1:
+                        continue
+                    min_f = np.argmin(flow)
+                    if len(flow[min_f:]) < min_obs:
+                        continue
+                    vols = calc_volumes(flow, 0.02)
+                    z.append(np.array([vols[min_f:], flow[min_f:]]).T)
+        # concat is faster. But breathmeta and GK fit take up vast majority of the time
+        z = np.concatenate(z)
+        # only use 2 clusters because we just divide the paper's n clusters by 2.
+        # m=2 was the param used in the paper
+        gk = GK(n_clusters=2, m=2)
+        z = np.array(z)
+        gk.fit(z)
+        objs_dir = self.processed_data_dir.joinpath('pickled_objs')
+        if not objs_dir.exists():
+            objs_dir.mkdir()
+        gk_pathname = objs_dir.joinpath('gk.pkl').resolve()
+        pd.to_pickle(gk, gk_pathname, compression=None)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -151,10 +189,13 @@ def main():
     parser.add_argument('--min-plat-time', type=float, default=0.4, help='minimum amount of time a plat must occur for')
     parser.add_argument('--any-or-all', choices=['any', 'all'], default='any')
     parser.add_argument('--only-patient', help='only run specific patient')
+    parser.add_argument('--only-gk', action='store_true', help='only perform gk clustering for fuzzy clustering algo')
     args = parser.parse_args()
 
     proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path, args.min_plat_time, args.flow_bound, args.any_or_all)
-    proc.iter_raw_dir(args.only_patient)
+    if not args.only_gk:
+        proc.iter_raw_dir(args.only_patient)
+    proc.make_gk_clust(10, args.only_patient)
 
 
 if __name__ == '__main__':
