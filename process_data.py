@@ -12,6 +12,7 @@ from pathlib import Path
 # methods to detect asynchronies. There are a number of machine learning methods
 # that are free and available for use. Either way though, you will have access to the
 # asynchrony predictions in our dataset
+from algorithms.flow_asynchrony import get_gen_flow_async
 from algorithms.tor5 import detectPVI
 from fuzzy_clust_algos.gk import GK
 import numpy as np
@@ -129,13 +130,27 @@ class Processing(object):
             # this is where we use our private PVA detection software. For outside purposes, we've
             # saved the results to file. You can use the results of the algorithm in your own
             # reproduction if you need.
-            pva, pva_fused = detectPVI(read_processed_file(str(output_fname)+'.raw.npy'), output_subdir='/tmp', write_results=False)
+            breaths = list(read_processed_file(str(output_fname)+'.raw.npy'))
+            pva, pva_fused = detectPVI(breaths, output_subdir='/tmp', write_results=False)
+            # XXX ensure ventmode is represented properly.
+            # XXX
+            # XXX
+            if len(breaths) != len(extra_results_frame):
+                raise Exception('not supposed to happen, pt: {}'.format(patient_id))
+
+            vc_only = [b for idx, b in enumerate(breaths) if extra_results_frame.iloc[idx]['ventmode'] == 'vc']
+            flow_asyncs = get_gen_flow_async(vc_only)
             # this stands for double trigger asynchrony
             extra_results_frame['dta'] = pva['dbl.4']
             # this stands for breath stacking asynchrony
             extra_results_frame['bsa'] = pva['bs.1or2']
             # this stands for breathing artifacts like suction, cough, etc.
             extra_results_frame['artifact'] = pva['cosumtvd']
+            extra_results_frame = extra_results_frame.merge(flow_asyncs, on='rel_bn', how='left')
+            extra_results_frame.rename(columns={'severity': 'fa', 'location': 'fa_loc'}, inplace=True)
+            no_vc_mask = extra_results_frame.fa.isna()
+            extra_results_frame.loc[no_vc_mask, 'fa'] = 0
+            extra_results_frame.loc[no_vc_mask, 'fa_loc'] = 'NA'
             extra_results_frame.to_pickle(str(extra_output_fname))
 
     def iter_raw_dir(self, only_patient):
@@ -190,12 +205,14 @@ def main():
     parser.add_argument('--any-or-all', choices=['any', 'all'], default='any')
     parser.add_argument('--only-patient', help='only run specific patient')
     parser.add_argument('--only-gk', action='store_true', help='only perform gk clustering for fuzzy clustering algo')
+    parser.add_argument('--no-gk', action='store_true', help='dont run gk clustering')
     args = parser.parse_args()
 
     proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path, args.min_plat_time, args.flow_bound, args.any_or_all)
     if not args.only_gk:
         proc.iter_raw_dir(args.only_patient)
-    proc.make_gk_clust(10, args.only_patient)
+    if not args.no_gk:
+        proc.make_gk_clust(10, args.only_patient)
 
 
 if __name__ == '__main__':
