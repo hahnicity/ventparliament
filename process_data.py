@@ -132,9 +132,6 @@ class Processing(object):
             # reproduction if you need.
             breaths = list(read_processed_file(str(output_fname)+'.raw.npy'))
             pva, pva_fused = detectPVI(breaths, output_subdir='/tmp', write_results=False)
-            # XXX ensure ventmode is represented properly.
-            # XXX
-            # XXX
             if len(breaths) != len(extra_results_frame):
                 raise Exception('not supposed to happen, pt: {}'.format(patient_id))
 

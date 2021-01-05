@@ -25,7 +25,7 @@ from parliament.analyze import FileCalculations
 
 class ResultsContainer(object):
 
-    def __init__(self, experiment_name):
+    def __init__(self, experiment_name, wmd_n):
         self.proc_results = []
         self.algos_used = []
         self.experiment_name = experiment_name
@@ -34,6 +34,7 @@ class ResultsContainer(object):
         # you can always crank the dpi up for paper time
         self.dpi = 200
         self.boot_resamples = 100
+        self.wmd_n = wmd_n
 
     def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians, conf, **kwargs):
         """
@@ -139,6 +140,7 @@ class ResultsContainer(object):
 
         for algo in self.algos_used:
             self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
+        self.calc_wmd(self.proc_results)
 
         self.pp_all = self.analyze_per_patient_df(self.proc_results)
         self.bb_vc_only = self.proc_results[self.proc_results.ventmode == 'vc']
@@ -153,6 +155,14 @@ class ResultsContainer(object):
         self.pp_vc_only_async = self.analyze_per_patient_df(self.bb_vc_only_async)
         self.bb_pressure_only_async = self.proc_results[(self.proc_results.ventmode != 'vc') & ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0))]
         self.pp_pressure_only_async = self.analyze_per_patient_df(self.bb_pressure_only_async)
+
+    def calc_wmd(self, df):
+        for patiend_id, pt_df in df.groupby('patient_id'):
+            for algo in self.algos_used:
+                df.loc[pt_df.index, '{}_wm'.format(algo)] = pt_df[algo].rolling(self.wmd_n, min_periods=1).apply(lambda x: np.nanmedian(x))
+
+        for algo in self.algos_used:
+            df['{}_wmd'.format(algo)] = df.gold_stnd_compliance - df['{}_wm'.format(algo)]
 
     def collate_data(self, algos_used):
         """
@@ -366,8 +376,8 @@ def main():
     parser.add_argument('experiment_name')
     parser.add_argument('--only-patient', help='only run results for specific patient', nargs='*')
     parser.add_argument('--algos', nargs="*", default='all')
-    parser.add_argument('--tc-algos', choices=['al_rawas', 'brunner', 'fuzzy', 'ikeda', 'lourens', 'wiri', 'all'], nargs='*')
-    parser.add_argument('-ltc', '--lourens-tc-choice', type=int, default=75)
+    parser.add_argument('--tc-algos', choices=['al_rawas', 'brunner', 'fuzzy', 'ikeda', 'lourens', 'wiri', 'all'], nargs='*', default='all')
+    parser.add_argument('-ltc', '--lourens-tc-choice', type=int, default=50)
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
 
     args = parser.parse_args()
@@ -375,7 +385,7 @@ def main():
     all_patient_dirs = Path(args.data_path).glob('*')
     algo = 'predator'
     baseline = 'insp_least_squares'
-    results = ResultsContainer(args.experiment_name)
+    results = ResultsContainer(args.experiment_name, 20)
 
     for dir_ in sorted(list(all_patient_dirs)):
         patient_id = dir_.name
@@ -400,8 +410,10 @@ def main():
 #    # XXX debug
     import matplotlib.pyplot as plt
     patient_results = results.proc_results
+    results.analyze_results()
     for pt, df in results.proc_results.groupby('patient_id'):
-        df[calcs.algos_used].plot(title=pt, figsize=(3*8, 4*3), fontsize=6, colormap=cc.cm.glasbey)
+        wm_cols = ['{}_wm'.format(algo) for algo in calcs.algos_used]
+        df[wm_cols].plot(title=pt, figsize=(3*8, 4*3), fontsize=6, colormap=cc.cm.glasbey)
         gt = patient_results['gold_stnd_compliance']
         plt.plot(gt, label='gt')
         plt.show()

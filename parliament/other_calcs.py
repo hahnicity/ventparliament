@@ -205,15 +205,16 @@ def fuzzy_clustering_time_const(flow, vols, x0_index, min_n_obs, alpha, gk_cls):
     :param alpha: The alpha param used to make an alpha-cut. In the paper this is 0.8
     :param gk_cls: Trained GK algo object.
     """
+    n_clust = gk_cls.u.shape[0]
     # if flow never crosses 0 then quit
     if x0_index >= len(flow)-1:
-        return np.nan
+        return [np.nan] * n_clust
 
     # the paper never states this, but our impl takes flow from min flow to end. Otherwise
     # the time const may be lengthened.
     min_f_idx = np.argmin(flow)
     if len(flow[min_f_idx:]) < min_n_obs:
-        return np.nan
+        return [np.nan] * n_clust
 
     z = np.array([vols[min_f_idx:], flow[min_f_idx:]]).T
     u = gk_cls.predict_proba(z)

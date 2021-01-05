@@ -52,6 +52,7 @@ class FileCalculations(object):
             'iipredator': self.iipredator,
             "kannangara": self.kannangara,
             # XXX mccay is currently working from a software perspective but the results are off.
+            # its a bit too slow and I am going to skip it for now.
             #'mccay': self.mccay,
             'major': self.major,
             'mipr': self.mipr,
@@ -150,7 +151,7 @@ class FileCalculations(object):
         }
         if not kwargs.get('tc_algos'):
             self.tc_algos = ['al_rawas']
-        elif kwargs.get('tc_algos') == ['all']:
+        elif kwargs.get('tc_algos') == ['all'] or kwargs.get('tc_algos') == 'all':
             self.tc_algos = list(self.tc_algo_mapping.keys())
         elif isinstance(kwargs.get('tc_algos'), list):
             self.tc_algos = kwargs.get('tc_algos')
