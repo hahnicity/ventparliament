@@ -4,6 +4,7 @@ main
 """
 import argparse
 from copy import copy
+from itertools import cycle
 from pathlib import Path
 import sys
 import traceback
@@ -122,8 +123,10 @@ class ResultsContainer(object):
                 row = [patient_id, algo]
                 row.append(median_absolute_deviation(frame['{}_diff'.format(algo)], nan_policy='omit'))
                 row.append(frame[algo].std())
+                row.append(median_absolute_deviation(frame['{}_wmd'.format(algo)], nan_policy='omit'))
+                row.append(frame['{}_wmd'.format(algo)].std())
                 row_results.append(row)
-        cols = ['patient_id', 'algo', 'mad', 'std']
+        cols = ['patient_id', 'algo', 'mad_pt', 'std_pt', 'mad_wmd', 'std_wmd']
         return pd.DataFrame(row_results, columns=cols)
 
     def analyze_results(self):
@@ -142,18 +145,19 @@ class ResultsContainer(object):
             self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
         self.calc_wmd(self.proc_results)
 
+        async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0))
         self.pp_all = self.analyze_per_patient_df(self.proc_results)
         self.bb_vc_only = self.proc_results[self.proc_results.ventmode == 'vc']
         self.pp_vc_only = self.analyze_per_patient_df(self.bb_vc_only)
         self.bb_pressure_only = self.proc_results[self.proc_results.ventmode.isin(['pc', 'prvc'])]
         self.pp_pressure_only = self.analyze_per_patient_df(self.bb_pressure_only)
-        self.bb_async_results = self.proc_results[(self.proc_results.dta != 0) | (self.proc_results.bsa != 0)]
+        self.bb_async_results = self.proc_results[async_mask]
         self.pp_async_results = self.analyze_per_patient_df(self.bb_async_results)
         self.bb_artifacts = self.proc_results[self.proc_results.artifact != 0]
         self.pp_artifacts = self.analyze_per_patient_df(self.bb_artifacts)
-        self.bb_vc_only_async = self.proc_results[(self.proc_results.ventmode == 'vc') & ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0))]
+        self.bb_vc_only_async = self.proc_results[(self.proc_results.ventmode == 'vc') & async_mask]
         self.pp_vc_only_async = self.analyze_per_patient_df(self.bb_vc_only_async)
-        self.bb_pressure_only_async = self.proc_results[(self.proc_results.ventmode != 'vc') & ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0))]
+        self.bb_pressure_only_async = self.proc_results[(self.proc_results.ventmode != 'vc') & async_mask]
         self.pp_pressure_only_async = self.analyze_per_patient_df(self.bb_pressure_only_async)
 
     def calc_wmd(self, df):
@@ -162,7 +166,15 @@ class ResultsContainer(object):
                 df.loc[pt_df.index, '{}_wm'.format(algo)] = pt_df[algo].rolling(self.wmd_n, min_periods=1).apply(lambda x: np.nanmedian(x))
 
         for algo in self.algos_used:
-            df['{}_wmd'.format(algo)] = df.gold_stnd_compliance - df['{}_wm'.format(algo)]
+            wm_colname = '{}_wm'.format(algo)
+            wmd_colname = '{}_wmd'.format(algo)
+            diff_colname = '{}_diff'.format(algo)
+            df[wmd_colname] = df.gold_stnd_compliance - df[wm_colname]
+            # make sure algo calcs are null if not available for specific mode
+            if algo in FileCalculations.algos_unavailable_for_vc:
+                df.loc[df.ventmode == 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
+            elif algo in FileCalculations.algos_unavailable_for_pc_prvc:
+                df.loc[df.ventmode != 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
 
     def collate_data(self, algos_used):
         """
@@ -190,6 +202,8 @@ class ResultsContainer(object):
                 # the median
                 algo_median = df[algo].median(skipna=True)
                 algo_mad = median_absolute_deviation(df[algo].values, nan_policy='omit')
+                # XXX will probably need to change this with wmd impl
+                # XXX
                 # multiply the algo mad by 15 because we want to be absolutely sure we arent
                 # removing any results that may be within range of the actual ground truth
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 15*algo_mad)].index, algo] = np.nan
@@ -203,17 +217,24 @@ class ResultsContainer(object):
             medians.append(med)
         return np.array(medians), np.array(conf_intervals)
 
-    def preprocess_mad_std_in_df(self, df):
+    def preprocess_mad_std_in_df(self, df, use_wmd):
         # Do scatter of MAD by std
         mad_std = {algo: [[], [], None, None, None] for algo in self.algos_used}
         algo_dists = []
+        if not use_wmd:
+            mad_col = 'mad_pt'
+            std_col = 'std_pt'
+        else:
+            mad_col = 'mad_wmd'
+            std_col = 'std_wmd'
+
         for algo in self.algos_used:
             # mad on x axis, std on y
-            mad_std[algo][0] = df[df.algo == algo]['mad']
+            mad_std[algo][0] = df[df.algo == algo][mad_col]
             if np.isnan(mad_std[algo][0]).all():
                 del mad_std[algo]
                 continue
-            mad_std[algo][1] = df[df.algo == algo]['std']
+            mad_std[algo][1] = df[df.algo == algo][std_col]
             mean_mad = np.nanmean(mad_std[algo][0])
             mean_std = np.nanmean(mad_std[algo][1])
             mad_std[algo][2] = mean_mad
@@ -228,16 +249,16 @@ class ResultsContainer(object):
         algos_in_order = np.array(algos_used)[algo_ordering]
         return mad_std, algos_in_order
 
-    def plot_algo_scatter(self, df, plt_title, figname):
+    def plot_algo_scatter(self, df, use_wmd, plt_title, figname):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
         X-axis is MAD and Y-axis is std.
         """
-        mad_std, algos_in_order = self.preprocess_mad_std_in_df(df)
-        markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$', '$\dag$', '$\ddag$', '$\P$']
+        mad_std, algos_in_order = self.preprocess_mad_std_in_df(df, use_wmd)
+        markers = cycle(['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$', '$\dag$', '$\ddag$', '$\P$'])
         colors = [cc.cm.glasbey(i) for i in range(len(self.algos_used))]
-        algo_dict = {algo: {'m': markers[i], 'c': colors[i]} for i, algo in enumerate(self.algos_used)}
+        algo_dict = {algo: {'m': next(markers), 'c': colors[i]} for i, algo in enumerate(self.algos_used)}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
         for i, algo in enumerate(algos_in_order):
@@ -276,24 +297,36 @@ class ResultsContainer(object):
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
         return mad_std, algos_in_order
 
-    def plot_algo_mad_std_boxplots(self, df, algo_ordering, figname_prefix):
+    def plot_algo_mad_std_boxplots(self, df, algo_ordering, use_wmd, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
         # you can use bootstrap too if you want, but for now I'm not going to
-        sns.boxplot(x='algo', y='mad', data=df, order=algo_ordering, notch=True)
+        if not use_wmd:
+            mad_col = 'mad_pt'
+            std_col = 'std_pt'
+        else:
+            mad_col = 'mad_wmd'
+            std_col = 'std_wmd'
+
+        sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True)
+        # XXX redo labeling
         ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=12)
         ax.set_xlabel('Algorithm', fontsize=12)
         ax.set_ylim(-.004, .026)
-        fig.savefig(self.results_dir.joinpath('{}_mad_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=self.dpi)
+        # XXX wmd or pt ??? need to change filename
+        fig.savefig(self.results_dir.joinpath('{}_mad_wmd_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=self.dpi)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
-        sns.boxplot(x='algo', y='std', data=df, order=algo_ordering, notch=True)
+        sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True)
+        # XXX redo labeling
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=12)
         ax.set_xlabel('Algorithm', fontsize=12)
         ax.set_ylim(-.004, .031)
-        fig.savefig(self.results_dir.joinpath('{}_std_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=self.dpi)
+        # XXX wmd or pt ??? need to change filename
+        fig.savefig(self.results_dir.joinpath('{}_std_wmd_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=self.dpi)
 
     def show_individual_breath_by_breath_frame_results(self, df, figname):
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
+        # XXX add WMD option
         diff_cols = ["{}_diff".format(algo) for algo in self.algos_used]
         # remember conf interval only gives you relative confidence of where the median is
         # it wont tell you anything about IQR and how widely the data is distributed.
@@ -307,6 +340,7 @@ class ResultsContainer(object):
         self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians[sorted_dist_idxs], conf[sorted_dist_idxs], notch=True, bootstrap=self.boot_resamples)
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
         plt.setp(xtick_names, rotation=30, fontsize=10)
+        # XXX redo labeling
         ax.set_ylabel('Difference between Compliance and Algo')
         ax.set_xlabel('Algo', fontsize=12)
         # want to keep a constant y perspective to compare algos
@@ -330,24 +364,26 @@ class ResultsContainer(object):
         self.show_individual_breath_by_breath_frame_results(self.bb_vc_only_async, 'vc_only_async_breath_by_breath_results.png')
         self.show_individual_breath_by_breath_frame_results(self.bb_pressure_only_async, 'pressure_only_async_breath_by_breath_results.png')
 
-    def plot_per_patient_results(self):
+    def plot_per_patient_results(self, use_wmd):
         """
         Plot patient by patient results
+
+        :param use_wmd: use wmd or no?
         """
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all, 'Patient by patient results. No filters', 'patient_by_patient_result.png')
-        self.plot_algo_mad_std_boxplots(self.pp_all, algos_in_order, 'patient_by_patient')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png')
-        self.plot_algo_mad_std_boxplots(self.pp_vc_only, algos_in_order, 'vc_only_pbp')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png')
-        self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, 'pressure_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all, use_wmd, 'Patient by patient results. No filters', 'patient_by_patient_result.png')
+        self.plot_algo_mad_std_boxplots(self.pp_all, algos_in_order, use_wmd, 'patient_by_patient')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, use_wmd, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png')
+        self.plot_algo_mad_std_boxplots(self.pp_vc_only, algos_in_order, use_wmd, 'vc_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png')
+        self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
         # plot out asynchronies and artifacts across the entire cohort. We likely will not
         # have enough data to draw any conclusions about artifacts
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_async_results, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png')
-        self.plot_algo_mad_std_boxplots(self.pp_async_results, algos_in_order, 'asynchronies_only_pbp')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_async_results, use_wmd, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png')
+        self.plot_algo_mad_std_boxplots(self.pp_async_results, algos_in_order, use_wmd, 'asynchronies_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, use_wmd, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png')
         # group asynchronies/artifacts by mode
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, use_wmd, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png')
 
         # I go back and forth in between questioning whether this belongs here or in per_patient
         for algo in self.algos_used:

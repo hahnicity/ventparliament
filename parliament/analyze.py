@@ -31,6 +31,12 @@ class MetadataRow(object):
 
 
 class FileCalculations(object):
+    algos_unavailable_for_pc_prvc = [
+        'iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'major',
+        'polynomial', 'pt_insp_lstsq', 'howe_lstsq', 'pt_exp_lstsq',
+    ]
+    algos_unavailable_for_vc = ['kannangara', 'ft_insp_lstsq']
+
     def __init__(self, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, **kwargs):
         """
         Calculate lung compliance for an entire file using a variety of algorithms
@@ -71,10 +77,6 @@ class FileCalculations(object):
             raise Exception('algorithms_to_use var must either be a list of algos to use or "all"')
         else:
             self.algorithms_to_use = algorithms_to_use
-        # XXX add all pressure-predicting least squares methods here.
-        self.algos_unavailable_for_pc_prvc = ['iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'major', 'polynomial']
-        # XXX need to add flow-predicting least squares methods.
-        self.algos_unavailable_for_vc = ['kannangara']
         self.extra_breath_info = extra_breath_info
         self.filename = filename
         if 'mccay' in self.algorithms_to_use:
@@ -165,7 +167,7 @@ class FileCalculations(object):
 
         # setup results data list
         self.results = []
-        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'artifact']
+        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'fa', 'fa_loc', 'artifact']
         non_algo_cols = len(self.results_cols)
         for algo in self.algorithms_to_use:
             if algo in self.algos_with_tc:
@@ -646,9 +648,9 @@ class FileCalculations(object):
                     'params for calc_inspiratory_plateau.'
                 )
             gold = (tvi / 1000.0) / (plat - peep)
-            breath_results = [rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.artifact]
+            breath_results = [rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa, ei_row.fa_loc, ei_row.artifact]
         else:
-            breath_results = [rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.artifact]
+            breath_results = [rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa, ei_row.fa_loc, ei_row.artifact]
 
         for algo in self.algorithms_to_use:
             if ventmode in ['pc', 'prvc'] and algo in self.algos_unavailable_for_pc_prvc:
