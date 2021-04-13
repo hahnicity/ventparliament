@@ -9,6 +9,8 @@ __pycache__/
 # repo specific items
 cohort.csv
 dataset/
+results/
+kannangara_code/
 
 # C extensions
 *.so
