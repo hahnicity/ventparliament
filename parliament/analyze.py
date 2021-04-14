@@ -37,7 +37,7 @@ class FileCalculations(object):
     ]
     algos_unavailable_for_vc = ['kannangara', 'ft_insp_lstsq']
 
-    def __init__(self, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, **kwargs):
+    def __init__(self, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, recorded_plat=None, **kwargs):
         """
         Calculate lung compliance for an entire file using a variety of algorithms
 
@@ -48,6 +48,7 @@ class FileCalculations(object):
         :param peeps_to_use: Number of PEEPs to use when we calculate a median
         :param extra_breath_info: DataFrame of additional information like location of valid plat pressures for breath
         :param recorded_compliance: Compliance pre-recorded for the file. Relevant for CVC data
+        :param recorded_plat: Plateau Pressure pre-recorded for the file. Relevant for CVC data
         """
         self.algo_mapping = {
             "al_rawas": self.al_rawas,
@@ -91,6 +92,7 @@ class FileCalculations(object):
             MetadataRow(get_production_breath_meta(breath)) for breath in self.breath_data
         ]
         self.recorded_gold = np.nan if not recorded_compliance else recorded_compliance
+        self.recorded_plat = np.nan if not recorded_plat else recorded_plat
         # XXX want to make this into a dict eventually
         self.reconstruction_methods = {
             'iipr',
@@ -167,7 +169,7 @@ class FileCalculations(object):
 
         # setup results data list
         self.results = []
-        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'fa', 'fa_loc', 'artifact']
+        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'fa', 'fa_loc', 'artifact', 'peep', 'tvi', 'p_plat', 'p_driving']
         non_algo_cols = len(self.results_cols)
         for algo in self.algorithms_to_use:
             if algo in self.algos_with_tc:
@@ -649,9 +651,17 @@ class FileCalculations(object):
                 )
             # gold standard is formatted in ml/cm H2O
             gold = tvi / (plat - peep)
-            breath_results = [rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa, ei_row.fa_loc, ei_row.artifact]
+            # plats are forwarded in post-processing
+            breath_results = [
+                rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa,
+                ei_row.fa_loc, ei_row.artifact, peep, tvi, plat, plat-peep,
+            ]
         else:
-            breath_results = [rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa, ei_row.fa_loc, ei_row.artifact]
+            breath_results = [
+                rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa,
+                ei_row.fa, ei_row.fa_loc, ei_row.artifact, peep, tvi,
+                self.recorded_plat, self.recorded_plat-peep,
+            ]
 
         for algo in self.algorithms_to_use:
             if ventmode in ['pc', 'prvc'] and algo in self.algos_unavailable_for_pc_prvc:
@@ -660,7 +670,6 @@ class FileCalculations(object):
             elif ventmode == 'vc' and algo in self.algos_unavailable_for_vc:
                 breath_results.append(np.nan)
                 continue
-
             func = self.algo_mapping[algo]
 
             # make sure to format things in ml

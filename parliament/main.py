@@ -187,10 +187,13 @@ class ResultsContainer(object):
         for patient, frame in proc_results.groupby('patient_id'):
             valid_plats = frame[frame.is_valid_plat == True]
             # some rows will have multiple plats overlapping with them. we can average the plat
-            # results to get a statistically valid plateau pressure
+            # get a compliance, plateau pressure, and driving pressure
             for i, row in frame.iterrows():
                 plats_in_range = valid_plats[(valid_plats.abs_bs - pd.Timedelta(hours=0.5) < row.abs_bs) & (row.abs_bs < valid_plats.abs_bs + pd.Timedelta(hours=0.5))]
                 proc_results.loc[i, 'gold_stnd_compliance'] = plats_in_range.gold_stnd_compliance.mean()
+                proc_results.loc[i, 'p_plat'] = (proc_results.loc[i, 'tvi']/proc_results.loc[i, 'gold_stnd_compliance']) + proc_results.loc[i, 'peep']
+                proc_results.loc[i, 'p_driving'] = proc_results.loc[i, 'p_plat'] - proc_results.loc[i, 'peep']
+
         self.proc_results = proc_results
         # filter outliers by patient
         for algo in algos_used:
