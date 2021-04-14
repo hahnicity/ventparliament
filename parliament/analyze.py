@@ -246,7 +246,7 @@ class FileCalculations(object):
         for tc_algo in self.tc_algos:
             tau = self.tc_algo_mapping[tc_algo](breath_idx)
             tc_results.append(algo(breath_idx, tau))
-        return tc_results
+        return np.array(tc_results)
 
     def al_rawas(self, breath_idx, tau):
         """
@@ -647,7 +647,8 @@ class FileCalculations(object):
                     'this breath is supposed to be a plat, but no plat was found! Check ' +
                     'params for calc_inspiratory_plateau.'
                 )
-            gold = (tvi / 1000.0) / (plat - peep)
+            # gold standard is formatted in ml/cm H2O
+            gold = tvi / (plat - peep)
             breath_results = [rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa, ei_row.fa_loc, ei_row.artifact]
         else:
             breath_results = [rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa, ei_row.fa_loc, ei_row.artifact]
@@ -661,10 +662,12 @@ class FileCalculations(object):
                 continue
 
             func = self.algo_mapping[algo]
+
+            # make sure to format things in ml
             if algo in self.algos_with_tc:
-                breath_results.extend(self.perform_algo_with_tc(breath_idx, func))
+                breath_results.extend(self.perform_algo_with_tc(breath_idx, func)*1000)
             else:
-                breath_results.append(func(breath_idx))
+                breath_results.append(func(breath_idx)*1000)
         return breath_results
 
     def analyze_file(self):

@@ -217,6 +217,74 @@ class ResultsContainer(object):
             medians.append(med)
         return np.array(medians), np.array(conf_intervals)
 
+    def extract_descriptive_statistics(self):
+        """
+        Gather descriptive statistics for dataset using the processed results dataframe
+        """
+        data = [
+            # general patient stats
+            'n patients',
+            '% Female',
+            'Age (IQR)',
+            'median RASS (IQR)',
+            '% paralyzed',
+            # ventmode n
+            'n vc patients',
+            'n pc patients',
+            'n prvc patients',
+            # general breath counts
+            'total breaths',
+            'total vc breaths',
+            'total pc breaths',
+            'total prvc breaths',
+            'mean breaths per patient',
+            # asynchronous breath counts
+            'total vc async breaths',
+            'total pc async breaths',
+            'total prvc async breaths',
+            'mean vc async per patient',
+            'mean pc async per patient',
+            'mean prvc async per patient',
+        ]
+        n_patients = len(self.proc_results.patient_id.unique())
+        async_mask = ((self.proc_results.dta>0) | (self.proc_results.bsa>0) | (self.proc_results.fa>0))
+        vc_pts = len(self.proc_results[self.proc_results.ventmode=='vc'].patient_id.unique())
+        pc_pts = len(self.proc_results[self.proc_results.ventmode=='pc'].patient_id.unique())
+        prvc_pts = len(self.proc_results[self.proc_results.ventmode=='prvc'].patient_id.unique())
+        n_vc_async = len(self.proc_results[(self.proc_results.ventmode=='vc') & async_mask])
+        n_pc_async = len(self.proc_results[(self.proc_results.ventmode=='pc') & async_mask])
+        n_prvc_async = len(self.proc_results[(self.proc_results.ventmode=='prvc') & async_mask])
+        vals = [
+            # general stats
+            n_patients,
+            'TODO',  # need sex data. can get this later tho
+            'TODO',  # another thing that we dont need now
+            'TODO',  # get this from cohort.csv
+            'TODO',  # will need to get this from EHR. But probably not necessary yet.
+            # ventmode n
+            vc_pts,
+            pc_pts,
+            prvc_pts,
+            # general breath counts
+            len(self.proc_results),
+            len(self.proc_results[self.proc_results.ventmode=='vc']),
+            len(self.proc_results[self.proc_results.ventmode=='pc']),
+            len(self.proc_results[self.proc_results.ventmode=='prvc']),
+            len(self.proc_results)/n_patients,
+            # async breath counts
+            n_vc_async,
+            n_pc_async,
+            n_prvc_async,
+            round(n_vc_async / vc_pts, 2),
+            round(n_pc_async / pc_pts, 2),
+            n_prvc_async / prvc_pts,
+        ]
+        table = PrettyTable()
+        table.field_names = ['stat', 'val']
+        for stat, val in zip(data, vals):
+            table.add_row([stat, val])
+        print(table)
+
     def preprocess_mad_std_in_df(self, df, use_wmd):
         # Do scatter of MAD by std
         mad_std = {algo: [[], [], None, None, None] for algo in self.algos_used}
@@ -294,7 +362,7 @@ class ResultsContainer(object):
         fig.legend(fontsize=16, loc='center right')
         ax.grid()
         ax.set_title(plt_title)
-        fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
+        fig.savefig(str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd)), dpi=self.dpi)
         return mad_std, algos_in_order
 
     def plot_algo_mad_std_boxplots(self, df, algo_ordering, use_wmd, figname_prefix):
