@@ -36,6 +36,7 @@ class ResultsContainer(object):
         self.dpi = 200
         self.boot_resamples = 100
         self.wmd_n = wmd_n
+        self.full_analysis_done = False
 
     def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians, conf, **kwargs):
         """
@@ -80,17 +81,6 @@ class ResultsContainer(object):
 
         CI = np.percentile(estimate, percentiles)
         return CI, np.median(estimate)
-
-    @classmethod
-    def load_from_proc_results(cls, experiment_name):
-        """
-        Load a results container object if we already have saved the results dataframe
-        """
-        # this column matching could change in the future
-        res = ResultsContainer(experiment_name)
-        res.proc_results = pd.read_pickle(res.results_dir.joinpath('proc_results.pkl').resolve())
-        res.algos_used = res.proc_results.columns[3:-3]
-        return res
 
     @classmethod
     def load_from_experiment_name(cls, experiment_name):
@@ -159,6 +149,10 @@ class ResultsContainer(object):
         self.pp_vc_only_async = self.analyze_per_patient_df(self.bb_vc_only_async)
         self.bb_pressure_only_async = self.proc_results[(self.proc_results.ventmode != 'vc') & async_mask]
         self.pp_pressure_only_async = self.analyze_per_patient_df(self.bb_pressure_only_async)
+        self.full_analysis_done = True
+        # save a processed results container because this method takes the longest
+        # time out of all the other methods
+        pd.to_pickle(self, self.results_dir.joinpath('ResultsContainer.pkl'))
 
     def calc_wmd(self, df):
         for patiend_id, pt_df in df.groupby('patient_id'):
@@ -241,6 +235,9 @@ class ResultsContainer(object):
             'total pc breaths',
             'total prvc breaths',
             'mean breaths per patient',
+            'mean vc per patient',
+            'mean pc per patient',
+            'mean prvc per patient',
             # asynchronous breath counts
             'total vc async breaths',
             'total pc async breaths',
@@ -274,13 +271,16 @@ class ResultsContainer(object):
             len(self.proc_results[self.proc_results.ventmode=='pc']),
             len(self.proc_results[self.proc_results.ventmode=='prvc']),
             len(self.proc_results)/n_patients,
+            len(self.proc_results[self.proc_results.ventmode=='vc']) / vc_pts if vc_pts != 0 else np.nan,
+            len(self.proc_results[self.proc_results.ventmode=='pc']) / pc_pts if pc_pts != 0 else np.nan,
+            len(self.proc_results[self.proc_results.ventmode=='prvc']) / prvc_pts if prvc_pts != 0 else np.nan,
             # async breath counts
             n_vc_async,
             n_pc_async,
             n_prvc_async,
-            round(n_vc_async / vc_pts, 2),
-            round(n_pc_async / pc_pts, 2),
-            n_prvc_async / prvc_pts,
+            round(n_vc_async / vc_pts, 2) if vc_pts != 0 else np.nan,
+            round(n_pc_async / pc_pts, 2) if pc_pts != 0 else np.nan,
+            n_prvc_async / prvc_pts if prvc_pts != 0 else np.nan,
         ]
         table = PrettyTable()
         table.field_names = ['stat', 'val']
