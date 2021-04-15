@@ -501,7 +501,12 @@ def main():
             if args.only_patient and patient_id not in args.only_patient:
                 continue
             extra = pd.read_pickle(str(file).replace('raw.npy', 'extra.pkl'))
-            calcs = FileCalculations(str(file), args.algos, 9, extra, tc_algos=args.tc_algos, lourens_tc_choice=args.lourens_tc_choice)
+            if 'cvc' in str(file):
+                compliance_f = dir_.joinpath('compliance.txt')
+                recorded_compliance = int(open(compliance_f).read().strip())
+            else:
+                recorded_compliance = None
+            calcs = FileCalculations(str(file), args.algos, 9, extra, tc_algos=args.tc_algos, lourens_tc_choice=args.lourens_tc_choice, recorded_compliance=recorded_compliance)
             try:
                 calcs.analyze_file()
             except Exception as err:

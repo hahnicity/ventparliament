@@ -57,20 +57,11 @@ class Processing(object):
         else:
             return False
 
-    def iterate_on_pt(self, rows):
-        """
-        Iterate over all transferred raw patient files, and only keep breaths within
-        the time window of information that we desire. Ensure we preprocess and save
-        all necessary data for future use in analysis.
-        """
-        # alright the additional information i want to include is:
-        #
-        # rel_bn: relative breath num
-        # is_valid_plat: true/false
+    def get_plats_for_patient(self, patient_id):
         plats = []
-        patient_id = rows.iloc[0]['patient_id']
         for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv'))):
-            # just start at the beginning of time for sanity purposes and saving extra if/then blocks
+            # just start at the beginning of time for sanity purposes and
+            # saving extra if/then blocks
             with open(str(f), encoding='ascii', errors='ignore') as desc:
                 gen = extract_raw(desc, False)
                 for br in gen:
@@ -91,7 +82,31 @@ class Processing(object):
                         plats.append((f, br['rel_bn'], dt))
                     elif is_plat and not self.check_is_qi_cohort_plat(rows, dt) and br['rel_bn'] in rows.validated_rel_bn.values:
                         plats.append((f, br['rel_bn'], dt))
+        return plats
 
+    def iterate_on_pt(self, rows):
+        """
+        Iterate over all transferred raw patient files, and only keep breaths within
+        the time window of information that we desire. Ensure we preprocess and save
+        all necessary data for future use in analysis.
+        """
+        # alright the additional information i want to include is:
+        #
+        # rel_bn: relative breath num
+        # is_valid_plat: true/false
+
+        # Step 1: check for valid plats and add them to an array
+        patient_id = rows.iloc[0]['patient_id']
+        is_cvc = rows.iloc[0].is_cvc
+        if not is_cvc:
+            plats = self.get_plats_for_patient(patient_id)
+        else:
+            # XXX for cvc data it might be helpful in the future to utilize
+            # measured plat rather than the QuickLung plat setting.
+            plats = []
+
+        # Step 2: find which breaths that we want to save which are within range
+        # of our plateau pressures
         br_to_save = {f: [] for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv')))}
         for f, bn, plat_time in plats:
             br_to_save[f].append((bn, True))
@@ -102,6 +117,10 @@ class Processing(object):
 
                 for br in gen:
                     dt = pd.to_datetime(br['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+                    if is_cvc:
+                        br_to_save[f].append((br['rel_bn'], False))
+                        continue
+
                     for _, __, plat_time in plats:
 
                         if (f, br['rel_bn'], dt) in plats:
@@ -110,6 +129,9 @@ class Processing(object):
                             br_to_save[f].append((br['rel_bn'], False))
                             break
 
+        # Step 3: run ventmode and PVA algos. ventmode can be just used to add more
+        # information and double check we arent using data we shouldn't be using. PVA
+        # algos are used to add more information for analytics.
         for f, vals in br_to_save.items():
             vals = sorted(vals, key=lambda x: x[0])
             if len(vals) == 0:
@@ -160,6 +182,8 @@ class Processing(object):
     def make_gk_clust(self, min_obs, only_patient):
         """
         Make GK clustering obj using Babuska's fuzzy clustering algo for the exp. curve only
+
+        Not actually too sure what I was doing here. Looks like something experimental
         """
         z = []
         for patient_dir in self.processed_data_dir.glob('*RPI*'):
