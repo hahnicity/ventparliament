@@ -46,7 +46,7 @@ class ResultsContainer(object):
         plotter = _BoxPlotter(x=None, y=None, hue=None, data=data, order=None, hue_order=None,
                               orient=None, color=None, palette=None, saturation=.75, width=.8,
                               dodge=True, fliersize=5, linewidth=None)
-        kwargs.update(dict(whis=1.5))
+        kwargs.update(dict(whis=1.5, showfliers=False))
         vert = plotter.orient == "v"
 
         props = {}
@@ -320,7 +320,7 @@ class ResultsContainer(object):
         algos_in_order = np.array(algos_used)[algo_ordering]
         return mad_std, algos_in_order
 
-    def plot_algo_scatter(self, df, use_wmd, plt_title, figname):
+    def plot_algo_scatter(self, df, use_wmd, plt_title, figname, individual_patients):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
@@ -332,17 +332,18 @@ class ResultsContainer(object):
         algo_dict = {algo: {'m': next(markers), 'c': colors[i]} for i, algo in enumerate(self.algos_used)}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
-        for i, algo in enumerate(algos_in_order):
-            ax.scatter(
-                x=mad_std[algo][0],
-                y=mad_std[algo][1],
-                marker=algo_dict[algo]['m'],
-                color=algo_dict[algo]['c'],
-                label=algo,
-                alpha=0.4,
-                s=100,
-                zorder=1
-            )
+        if individual_patients:
+            for i, algo in enumerate(algos_in_order):
+                ax.scatter(
+                    x=mad_std[algo][0],
+                    y=mad_std[algo][1],
+                    marker=algo_dict[algo]['m'],
+                    color=algo_dict[algo]['c'],
+                    label=algo,
+                    alpha=0.4,
+                    s=100,
+                    zorder=1
+                )
 
         for i, algo in enumerate(algos_in_order):
             ax.scatter(
@@ -350,18 +351,21 @@ class ResultsContainer(object):
                 y=mad_std[algo][3],
                 marker=algo_dict[algo]['m'],
                 color=algo_dict[algo]['c'],
+                label=algo if not individual_patients else None,
                 alpha=.9,
                 s=350,
                 edgecolors='black',
                 zorder=len(self.algos_used)+2-i,
                 linewidths=1,
             )
+        x = [mad_std[a][2] for a in algos_in_order]
+        y = [mad_std[a][3] for a in algos_in_order]
         ax.tick_params(axis='x', labelsize=14)
         ax.tick_params(axis='y', labelsize=14)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
-        ax.set_xlim(-.001, .011)
-        ax.set_ylim(-.004, .026)
+        ax.set_xlim(-.1, np.mean(x)+1.5*np.std(x))
+        ax.set_ylim(-.4, np.mean(y)+1.5*np.std(y))
         fig.legend(fontsize=16, loc='center right')
         ax.grid()
         ax.set_title(plt_title)
@@ -378,22 +382,18 @@ class ResultsContainer(object):
             mad_col = 'mad_wmd'
             std_col = 'std_wmd'
 
-        sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True)
-        # XXX redo labeling
-        ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=12)
-        ax.set_xlabel('Algorithm', fontsize=12)
-        ax.set_ylim(-.004, .026)
-        # XXX wmd or pt ??? need to change filename
-        fig.savefig(self.results_dir.joinpath('{}_mad_wmd_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=self.dpi)
+        sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
+        ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=14)
+        ax.set_xlabel('Algorithm', fontsize=14)
+        ax.set_ylim(-.4, 26)
+        fig.savefig(self.results_dir.joinpath('{}_mad_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
-        sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True)
-        # XXX redo labeling
-        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=12)
-        ax.set_xlabel('Algorithm', fontsize=12)
-        ax.set_ylim(-.004, .031)
-        # XXX wmd or pt ??? need to change filename
-        fig.savefig(self.results_dir.joinpath('{}_std_wmd_boxplot_result.png'.format(figname_prefix)).resolve(), dpi=self.dpi)
+        sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True, showfliers=False)
+        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=14)
+        ax.set_xlabel('Algorithm', fontsize=14)
+        ax.set_ylim(-.4, 31)
+        fig.savefig(self.results_dir.joinpath('{}_std_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
 
     def show_individual_breath_by_breath_frame_results(self, df, figname):
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
@@ -415,7 +415,7 @@ class ResultsContainer(object):
         ax.set_ylabel('Difference between Compliance and Algo')
         ax.set_xlabel('Algo', fontsize=12)
         # want to keep a constant y perspective to compare algos
-        ax.set_ylim(-0.025, 0.025)
+        #ax.set_ylim(-0.025, 0.025)
         title = figname.replace('.png', '').replace('_', ' ')
         ax.set_title(title, fontsize=16)
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
@@ -435,40 +435,44 @@ class ResultsContainer(object):
         self.show_individual_breath_by_breath_frame_results(self.bb_vc_only_async, 'vc_only_async_breath_by_breath_results.png')
         self.show_individual_breath_by_breath_frame_results(self.bb_pressure_only_async, 'pressure_only_async_breath_by_breath_results.png')
 
-    def plot_per_patient_results(self, use_wmd):
+    def plot_per_patient_results(self, use_wmd, individual_patients=False, show_boxplots=True):
         """
         Plot patient by patient results
 
         :param use_wmd: use wmd or no?
+        :param individual_patients: show individual_patients scatter points
+        :param show_boxplots: show boxplots after scatter plots
         """
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all, use_wmd, 'Patient by patient results. No filters', 'patient_by_patient_result.png')
-        self.plot_algo_mad_std_boxplots(self.pp_all, algos_in_order, use_wmd, 'patient_by_patient')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, use_wmd, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png')
-        self.plot_algo_mad_std_boxplots(self.pp_vc_only, algos_in_order, use_wmd, 'vc_only_pbp')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png')
-        self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all, use_wmd, 'Patient by patient results. No filters', 'patient_by_patient_result.png', individual_patients)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_all, algos_in_order, use_wmd, 'patient_by_patient')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, use_wmd, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png', individual_patients)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_vc_only, algos_in_order, use_wmd, 'vc_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png', individual_patients)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
         # plot out asynchronies and artifacts across the entire cohort. We likely will not
         # have enough data to draw any conclusions about artifacts
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_async_results, use_wmd, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png')
-        self.plot_algo_mad_std_boxplots(self.pp_async_results, algos_in_order, use_wmd, 'asynchronies_only_pbp')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, use_wmd, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_async_results, use_wmd, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png', individual_patients)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_async_results, algos_in_order, use_wmd, 'asynchronies_only_pbp')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, use_wmd, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png', individual_patients)
         # group asynchronies/artifacts by mode
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, use_wmd, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png')
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, use_wmd, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png', individual_patients)
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png', individual_patients)
 
         # I go back and forth in between questioning whether this belongs here or in per_patient
-        for algo in self.algos_used:
-            fig, ax = plt.subplots(figsize=(3*8, 3*2))
-            sns.boxplot(x='patient_id', y="{}_diff".format(algo), data=self.proc_results)
-            ax.set_ylabel('Difference between Compliance and Algo')
-            ax.set_xlabel('Patient', fontsize=12)
-            ax.set_title('{} plot by patient'.format(algo))
-            # want to keep a constant y perspective to compare algos
-            ax.set_ylim(-0.07, 0.07)
-            fig.savefig(self.results_dir.joinpath('{}_breath_by_breath_patient_result.png'.format(algo)).resolve(), dpi=self.dpi)
-        # XXX confidence?????
-        # XXX i think the main thing with per_breath is that you can draw harder confidence intervals
-        # compared to per_patient. So yeah, get a table going.
+        if show_boxplots:
+            for algo in self.algos_used:
+                fig, ax = plt.subplots(figsize=(3*8, 3*2))
+                sns.boxplot(x='patient_id', y="{}_diff".format(algo), data=self.proc_results, showfliers=False)
+                ax.set_ylabel('Difference between Compliance and Algo')
+                ax.set_xlabel('Patient', fontsize=12)
+                ax.set_title('{} plot by patient'.format(algo))
+                # want to keep a constant y perspective to compare algos
+                #ax.set_ylim(-0.07, 0.07)
+                fig.savefig(self.results_dir.joinpath('{}_breath_by_breath_patient_result.png'.format(algo)).resolve(), dpi=self.dpi)
 
     def save_results(self):
         if not self.results_dir.parent.exists():
@@ -486,6 +490,7 @@ def main():
     parser.add_argument('--tc-algos', choices=['al_rawas', 'brunner', 'fuzzy', 'ikeda', 'lourens', 'wiri', 'all'], nargs='*', default='all')
     parser.add_argument('-ltc', '--lourens-tc-choice', type=int, default=50)
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
+    parser.add_argument('--cvc-only', action='store_true', help='only analyze cvc data')
 
     args = parser.parse_args()
 
@@ -495,6 +500,9 @@ def main():
     results = ResultsContainer(args.experiment_name, 20)
 
     for dir_ in sorted(list(all_patient_dirs)):
+        if args.cvc_only and 'cvc' not in str(dir_):
+            continue
+
         patient_id = dir_.name
         for file in dir_.glob('*.raw.npy'):
             patient_id = file.parent.name

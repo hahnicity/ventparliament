@@ -20,9 +20,11 @@ from parliament.other_calcs import pt_inspiratory_least_squares as least_squares
 
 def get_predicted_pressure_waveform(flow, pressure, peep, x0, tvi, vols):
     """
-    Get the pressure waveform as predicted by the least squares model
+    Get the pressure waveform as predicted by the least squares model.
 
         Paw = E*V + R*V^dot + P0
+
+    We only use the inspiratory waveform.
 
     :param flow: array vals of flow measurements in L/s
     :param pressure: array vals of pressure obs
@@ -46,7 +48,7 @@ def find_pressure_regions(actual_pressure, modeled_pressure):
     """
     actual = actual_pressure[:len(modeled_pressure)]
     diff = modeled_pressure - actual
-    aucs = np.array([0] + [simps(diff[:i], dx=0.02) for i in range(2, len(diff))])
+    aucs = np.array([0] + [simps(diff[:i], dx=0.02) for i in range(2, len(diff)+1)])
     is_endpoint = False
 
     regions = [[0, None, None]]
@@ -123,10 +125,15 @@ def perform_polynomial_model(flow, vols, pressure, x0, peep, tvi):
     Response codes:
         0: Used algorithm and was successful
         2: Used least squares as fallback and was successful
+        3: Not enough inspiratory observations. Return nan
     """
+    if x0 < 4:
+        return np.nan, np.nan, np.nan, 3
+
     flow = np.array(flow)
     pressure = np.array(pressure)
     modeled_pressure, compliance, resistance, _ = get_predicted_pressure_waveform(flow, pressure, peep, x0, tvi, vols)
+
     ts, tf = find_ts_tf(pressure, modeled_pressure)
     # Perform least squares modeling
     result = perform_least_squares_fit(flow, pressure, vols, peep, x0, ts, tf)

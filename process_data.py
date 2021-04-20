@@ -35,18 +35,25 @@ class Processing(object):
         self.flow_bound = flow_bound
         self.any_or_all = any_or_all
 
-    def add_ventmode_metadata(self, extra_br_metadata, ventmode_file, raw_file):
+    def add_ventmode_metadata(self, extra_br_metadata, ventmode_file, raw_file, is_cvc):
         if not ventmode_file.exists():
             raise Exception('ventmode file for {} doesnt exist'.format(raw_file.name))
         vm = pd.read_csv(ventmode_file)
         study_supported_modes = ['vc', 'pc', 'prvc']
+        cvc_modes = ['vc', 'pc', 'prvc', 'cpap_sbt', 'ps']
         saved_bns = extra_br_metadata[:, 0]
         mode_df = vm[vm.bn.isin(saved_bns)]
-        if mode_df[study_supported_modes].sum().sum() != len(mode_df):
+        if mode_df[study_supported_modes].sum().sum() != len(mode_df) and not is_cvc:
             raise Exception('file {} has ventmodes that are not supported by this study'.format(raw_file.name))
         mode_df['ventmode'] = ''
-        for mode in study_supported_modes:
-            mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
+
+        if not is_cvc:
+            for mode in study_supported_modes:
+                mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
+        else:
+            for mode in cvc_modes:
+                mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
+
         return np.append(extra_br_metadata, np.expand_dims(mode_df['ventmode'].values, axis=1), axis=1)
 
     def check_is_qi_cohort_plat(self, rows, plat_time):
@@ -140,7 +147,7 @@ class Processing(object):
             with open(str(f), encoding='ascii', errors='ignore') as desc:
                 extra_br_metadata = np.array(vals)
                 ventmode_file = f.parent.joinpath('../../ventmodes/{}'.format(f.name.replace('.csv', '_1-ventmode-output.csv')))
-                extra_br_metadata = self.add_ventmode_metadata(extra_br_metadata, ventmode_file, f)
+                extra_br_metadata = self.add_ventmode_metadata(extra_br_metadata, ventmode_file, f, is_cvc)
                 output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', ''))
                 if not output_fname.parent.exists():
                     output_fname.parent.mkdir()
@@ -170,9 +177,11 @@ class Processing(object):
             no_vc_mask = extra_results_frame.fa.isna()
             extra_results_frame.loc[no_vc_mask, 'fa'] = 0
             extra_results_frame.loc[no_vc_mask, 'fa_loc'] = 'NA'
-            extra_results_frame.to_pickle(str(extra_output_fname))
+            extra_results_frame.to_pickle(str(extra_output_fname), protocol=4)
 
     def iter_raw_dir(self, only_patient):
+        if only_patient and only_patient not in self.cohort['patient_id'].unique():
+            raise Exception('patient {} is not in the cohort definition.'.format(only_patient))
         for patient_id, rows in self.cohort.groupby('patient_id'):
             if only_patient and only_patient == patient_id:
                 self.iterate_on_pt(rows)
@@ -223,7 +232,7 @@ def main():
     parser.add_argument('-pdp', '--processed-dataset-path', default='dataset/processed_data')
     parser.add_argument('--flow-bound', type=float, default=0.2, help='flow bound for plat pressures')
     parser.add_argument('--min-plat-time', type=float, default=0.4, help='minimum amount of time a plat must occur for')
-    parser.add_argument('--any-or-all', choices=['any', 'all'], default='any')
+    parser.add_argument('--any-or-all', choices=['any', 'all'], default='any', help='refers to plat check boundary')
     parser.add_argument('--only-patient', help='only run specific patient')
     parser.add_argument('--only-gk', action='store_true', help='only perform gk clustering for fuzzy clustering algo')
     parser.add_argument('--no-gk', action='store_true', help='dont run gk clustering')
