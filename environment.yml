@@ -12,6 +12,7 @@ dependencies:
   - pyqt
   - jupyter
   - pip
+  - scikit-learn
   - pip:
     - colorcet
     - git+https://github.com/hahnicity/fuzzy-clustering.git

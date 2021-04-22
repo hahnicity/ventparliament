@@ -12,6 +12,7 @@ from pathlib import Path
 # methods to detect asynchronies. There are a number of machine learning methods
 # that are free and available for use. Either way though, you will have access to the
 # asynchrony predictions in our dataset
+from algorithms.dca import extract_new_feature
 from algorithms.flow_asynchrony import get_gen_flow_async
 from algorithms.tor5 import detectPVI
 from fuzzy_clust_algos.gk import GK
@@ -54,7 +55,10 @@ class Processing(object):
             for mode in cvc_modes:
                 mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
 
-        return np.append(extra_br_metadata, np.expand_dims(mode_df['ventmode'].values, axis=1), axis=1)
+        try:
+            return np.append(extra_br_metadata, np.expand_dims(mode_df['ventmode'].values, axis=1), axis=1)
+        except:
+            import IPython; IPython.embed()
 
     def check_is_qi_cohort_plat(self, rows, plat_time):
         for i, row in rows.iterrows():
@@ -64,7 +68,7 @@ class Processing(object):
         else:
             return False
 
-    def get_plats_for_patient(self, patient_id):
+    def get_plats_for_patient(self, patient_id, rows):
         plats = []
         for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv'))):
             # just start at the beginning of time for sanity purposes and
@@ -104,9 +108,9 @@ class Processing(object):
 
         # Step 1: check for valid plats and add them to an array
         patient_id = rows.iloc[0]['patient_id']
-        is_cvc = rows.iloc[0].is_cvc
+        is_cvc = {'y': True, 'n': False}[rows.iloc[0].is_cvc]
         if not is_cvc:
-            plats = self.get_plats_for_patient(patient_id)
+            plats = self.get_plats_for_patient(patient_id, rows)
         else:
             # XXX for cvc data it might be helpful in the future to utilize
             # measured plat rather than the QuickLung plat setting.
@@ -165,7 +169,9 @@ class Processing(object):
                 raise Exception('not supposed to happen, pt: {}'.format(patient_id))
 
             vc_only = [b for idx, b in enumerate(breaths) if extra_results_frame.iloc[idx]['ventmode'] == 'vc']
+            pressure_only = [b for idx, b in enumerate(breaths) if extra_results_frame.iloc[idx]['ventmode'] in ['pc', 'prvc']]
             flow_asyncs = get_gen_flow_async(vc_only)
+            dca = extract_new_feature(pva, pressure_only)
             # this stands for double trigger asynchrony
             extra_results_frame['dta'] = pva['dbl.4']
             # this stands for breath stacking asynchrony
@@ -177,6 +183,12 @@ class Processing(object):
             no_vc_mask = extra_results_frame.fa.isna()
             extra_results_frame.loc[no_vc_mask, 'fa'] = 0
             extra_results_frame.loc[no_vc_mask, 'fa_loc'] = 'NA'
+            dca_cols = ['Dyna_DCA', 'dDCA', 'Static_DCA']
+            dca = dca[['rel_bn']+dca_cols]
+            extra_results_frame = extra_results_frame.merge(dca, on='rel_bn', how='left')
+            no_pc_mask = extra_results_frame.Dyna_DCA.isna()
+            extra_results_frame.loc[no_pc_mask, dca_cols] = 0
+            extra_results_frame = extra_results_frame.rename(columns={'Dyna_DCA': 'dyn_dca', 'Static_DCA': 'static_dca', 'dDCA': 'dyn_dca_timing'})
             extra_results_frame.to_pickle(str(extra_output_fname), protocol=4)
 
     def iter_raw_dir(self, only_patient):
