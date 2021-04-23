@@ -191,10 +191,12 @@ class Processing(object):
             extra_results_frame = extra_results_frame.rename(columns={'Dyna_DCA': 'dyn_dca', 'Static_DCA': 'static_dca', 'dDCA': 'dyn_dca_timing'})
             extra_results_frame.to_pickle(str(extra_output_fname), protocol=4)
 
-    def iter_raw_dir(self, only_patient):
+    def iter_raw_dir(self, only_patient, cvc_only):
         if only_patient and only_patient not in self.cohort['patient_id'].unique():
             raise Exception('patient {} is not in the cohort definition.'.format(only_patient))
         for patient_id, rows in self.cohort.groupby('patient_id'):
+            if cvc_only and 'cvc' not in patient_id:
+                continue
             if only_patient and only_patient == patient_id:
                 self.iterate_on_pt(rows)
             elif not only_patient:
@@ -248,11 +250,12 @@ def main():
     parser.add_argument('--only-patient', help='only run specific patient')
     parser.add_argument('--only-gk', action='store_true', help='only perform gk clustering for fuzzy clustering algo')
     parser.add_argument('--no-gk', action='store_true', help='dont run gk clustering')
+    parser.add_argument('--cvc-only', action='store_true', help='only run cvc patients')
     args = parser.parse_args()
 
     proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path, args.min_plat_time, args.flow_bound, args.any_or_all)
     if not args.only_gk:
-        proc.iter_raw_dir(args.only_patient)
+        proc.iter_raw_dir(args.only_patient, args.cvc_only)
     if not args.no_gk:
         proc.make_gk_clust(10, args.only_patient)
 

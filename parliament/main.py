@@ -364,11 +364,12 @@ class ResultsContainer(object):
         ax.tick_params(axis='y', labelsize=14)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
-        ax.set_xlim(-.1, np.mean(x)+1.5*np.std(x))
-        ax.set_ylim(-.4, np.mean(y)+1.5*np.std(y))
+        if len(x) > 1:
+            ax.set_xlim(-.1, np.mean(x)+1.5*np.std(x))
+            ax.set_ylim(-.4, np.mean(y)+1.5*np.std(y))
         fig.legend(fontsize=16, loc='center right')
         ax.grid()
-        ax.set_title(plt_title)
+        ax.set_title(plt_title, fontsize=20)
         fig.savefig(str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd)), dpi=self.dpi)
         return mad_std, algos_in_order
 
@@ -383,15 +384,15 @@ class ResultsContainer(object):
             std_col = 'std_wmd'
 
         sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
-        ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=14)
-        ax.set_xlabel('Algorithm', fontsize=14)
+        ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
+        ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 26)
         fig.savefig(self.results_dir.joinpath('{}_mad_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
         sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True, showfliers=False)
-        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=14)
-        ax.set_xlabel('Algorithm', fontsize=14)
+        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
+        ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 31)
         fig.savefig(self.results_dir.joinpath('{}_std_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
 
@@ -410,14 +411,14 @@ class ResultsContainer(object):
         algos_in_order = [algo.replace('_diff', '') for algo in sorted_diff_cols]
         self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians[sorted_dist_idxs], conf[sorted_dist_idxs], notch=True, bootstrap=self.boot_resamples)
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
-        plt.setp(xtick_names, rotation=30, fontsize=10)
+        plt.setp(xtick_names, rotation=30, fontsize=14)
         # XXX redo labeling
-        ax.set_ylabel('Difference between Compliance and Algo')
-        ax.set_xlabel('Algo', fontsize=12)
+        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
+        ax.set_xlabel('Algorithm', fontsize=16)
         # want to keep a constant y perspective to compare algos
         #ax.set_ylim(-0.025, 0.025)
         title = figname.replace('.png', '').replace('_', ' ')
-        ax.set_title(title, fontsize=16)
+        ax.set_title(title, fontsize=20)
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
         table = PrettyTable()
         table.field_names = ['algo', 'median diff', '95% conf_lower', '95% conf_upper', 'std']
@@ -468,8 +469,8 @@ class ResultsContainer(object):
                 fig, ax = plt.subplots(figsize=(3*8, 3*2))
                 sns.boxplot(x='patient_id', y="{}_diff".format(algo), data=self.proc_results, showfliers=False)
                 ax.set_ylabel('Difference between Compliance and Algo')
-                ax.set_xlabel('Patient', fontsize=12)
-                ax.set_title('{} plot by patient'.format(algo))
+                ax.set_xlabel('Patient', fontsize=16)
+                ax.set_title('{} plot by patient'.format(algo), fontsize=20)
                 # want to keep a constant y perspective to compare algos
                 #ax.set_ylim(-0.07, 0.07)
                 fig.savefig(self.results_dir.joinpath('{}_breath_by_breath_patient_result.png'.format(algo)).resolve(), dpi=self.dpi)
