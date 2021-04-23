@@ -135,7 +135,7 @@ class ResultsContainer(object):
             self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
         self.calc_wmd(self.proc_results)
 
-        async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0))
+        async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0) | (self.proc_results.static_dca != 0) | (self.proc_results.dyn_dca != 0))
         self.pp_all = self.analyze_per_patient_df(self.proc_results)
         self.bb_vc_only = self.proc_results[self.proc_results.ventmode == 'vc']
         self.pp_vc_only = self.analyze_per_patient_df(self.bb_vc_only)
@@ -247,7 +247,7 @@ class ResultsContainer(object):
             'mean prvc async per patient',
         ]
         n_patients = len(self.proc_results.patient_id.unique())
-        async_mask = ((self.proc_results.dta>0) | (self.proc_results.bsa>0) | (self.proc_results.fa>0))
+        async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0) | (self.proc_results.static_dca != 0) | (self.proc_results.dyn_dca != 0))
         vc_pts = len(self.proc_results[self.proc_results.ventmode=='vc'].patient_id.unique())
         pc_pts = len(self.proc_results[self.proc_results.ventmode=='pc'].patient_id.unique())
         prvc_pts = len(self.proc_results[self.proc_results.ventmode=='prvc'].patient_id.unique())
@@ -310,9 +310,9 @@ class ResultsContainer(object):
             mean_std = np.nanmean(mad_std[algo][1])
             mad_std[algo][2] = mean_mad
             mad_std[algo][3] = mean_std
-            # euclidean distance to origin (0, 0)
-            mad_std[algo][4] = np.sqrt(mean_mad**2+mean_std**2)
-            algo_dists.append(np.sqrt(mean_mad**2+mean_std**2))
+            # l1 distance to origin (0, 0). uses l1 because l2 places higher emphasis on std
+            mad_std[algo][4] = mean_mad+mean_std
+            algo_dists.append(mean_mad+mean_std)
 
         # sort items so we can give them higher z order based on precedence
         algo_ordering = np.argsort(np.array(algo_dists))

@@ -169,7 +169,11 @@ class FileCalculations(object):
 
         # setup results data list
         self.results = []
-        self.results_cols = ['rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa', 'fa', 'fa_loc', 'artifact', 'peep', 'tvi', 'p_plat', 'p_driving']
+        self.results_cols = [
+            'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa',
+            'fa', 'fa_loc', 'static_dca', 'dyn_dca', 'dyn_dca_timing', 'artifact',
+            'peep', 'tvi', 'p_plat', 'p_driving'
+        ]
         non_algo_cols = len(self.results_cols)
         for algo in self.algorithms_to_use:
             if algo in self.algos_with_tc:
@@ -654,13 +658,14 @@ class FileCalculations(object):
             # plats are forwarded in post-processing
             breath_results = [
                 rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa,
-                ei_row.fa_loc, ei_row.artifact, peep, tvi, plat, plat-peep,
+                ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
+                ei_row.artifact, peep, tvi, plat, plat-peep,
             ]
         else:
             breath_results = [
                 rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa,
-                ei_row.fa, ei_row.fa_loc, ei_row.artifact, peep, tvi,
-                self.recorded_plat, self.recorded_plat-peep,
+                ei_row.fa, ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
+                ei_row.artifact, peep, tvi, self.recorded_plat, self.recorded_plat-peep,
             ]
 
         for algo in self.algorithms_to_use:
