@@ -37,10 +37,11 @@ class FileCalculations(object):
     ]
     algos_unavailable_for_vc = ['kannangara', 'ft_insp_lstsq']
 
-    def __init__(self, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, recorded_plat=None, **kwargs):
+    def __init__(self, patient, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, recorded_plat=None, **kwargs):
         """
         Calculate lung compliance for an entire file using a variety of algorithms
 
+        :param patient: patient id
         :param filename: filename to analyze
         :param algorithms_to_use: Algorithms you want to include in your analysis. To use all of
         the available algos specific 'all'. To use specific ones, this argument should
@@ -80,6 +81,7 @@ class FileCalculations(object):
             self.algorithms_to_use = algorithms_to_use
         self.extra_breath_info = extra_breath_info
         self.filename = filename
+        self.patient = patient
         if 'mccay' in self.algorithms_to_use:
             # XXX not sure where these params come from. But I used them awhile back
             self.mccay_interface = McCayInterface([.5, 15.], .01, True)
@@ -170,7 +172,7 @@ class FileCalculations(object):
         # setup results data list
         self.results = []
         self.results_cols = [
-            'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa',
+            'patient', 'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa',
             'fa', 'fa_loc', 'static_dca', 'dyn_dca', 'dyn_dca_timing', 'artifact',
             'peep', 'tvi', 'p_plat', 'p_driving'
         ]
@@ -657,13 +659,13 @@ class FileCalculations(object):
             gold = tvi / (plat - peep)
             # plats are forwarded in post-processing
             breath_results = [
-                rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa,
+                self.patient, rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa,
                 ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
                 ei_row.artifact, peep, tvi, plat, plat-peep,
             ]
         else:
             breath_results = [
-                rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa,
+                self.patient, rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa,
                 ei_row.fa, ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
                 ei_row.artifact, peep, tvi, self.recorded_plat, self.recorded_plat-peep,
             ]

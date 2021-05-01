@@ -515,7 +515,7 @@ def main():
                 recorded_compliance = int(open(compliance_f).read().strip())
             else:
                 recorded_compliance = None
-            calcs = FileCalculations(str(file), args.algos, 9, extra, tc_algos=args.tc_algos, lourens_tc_choice=args.lourens_tc_choice, recorded_compliance=recorded_compliance)
+            calcs = FileCalculations(patient_id, str(file), args.algos, 9, extra, tc_algos=args.tc_algos, lourens_tc_choice=args.lourens_tc_choice, recorded_compliance=recorded_compliance)
             try:
                 calcs.analyze_file()
             except Exception as err:
