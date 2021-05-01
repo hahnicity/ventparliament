@@ -429,12 +429,29 @@ class ResultsContainer(object):
         display(HTML('<h2>{}</h2>'.format(title)))
         display(HTML(table.get_html_string()))
 
-    def plot_breath_by_breath_results(self):
-        self.show_individual_breath_by_breath_frame_results(self.proc_results, 'breath_by_breath_results.png')
-        self.show_individual_breath_by_breath_frame_results(self.bb_vc_only, 'vc_only_breath_by_breath_results.png')
-        self.show_individual_breath_by_breath_frame_results(self.bb_pressure_only, 'pressure_only_breath_by_breath_results.png')
-        self.show_individual_breath_by_breath_frame_results(self.bb_vc_only_async, 'vc_only_async_breath_by_breath_results.png')
-        self.show_individual_breath_by_breath_frame_results(self.bb_pressure_only_async, 'pressure_only_async_breath_by_breath_results.png')
+    def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[]):
+        only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
+        exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
+            'breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_vc_only, only_patient), exclude_cols),
+            'vc_only_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_pressure_only, only_patient), exclude_cols),
+            'pressure_only_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_vc_only_async, only_patient), exclude_cols),
+            'vc_only_async_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_pressure_only_async, only_patient), exclude_cols),
+            'pressure_only_async_breath_by_breath_results.png'
+        )
 
     def plot_per_patient_results(self, use_wmd, individual_patients=False, show_boxplots=True):
         """
