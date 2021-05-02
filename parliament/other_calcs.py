@@ -241,6 +241,10 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
     Inspiratory respiratory mechanics estimation by using expiratory data for reverse-triggered
     breathing cycles. Computer methods and programs in biomedicine. 2020 Apr 1;186:105184.
 
+    This algorithm uses pressure-targeted expiratory least squares model. Model is
+    changed though by ensuring both pressure and volume values are initially set to
+    0.
+
     :param flow: array vals of flow measurements in L/s
     :param vols: technically an unused param here. and exists for compatibility
                  across least squares methods you can set to None if you want.
@@ -250,7 +254,7 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
     :param peep: positive end expiratory pressure
     :param tvi: TVi in L
 
-    :returns tuple: plateau pressure, compliance, resistance, K, residual
+    :returns tuple: plateau pressure, compliance, resistance, peep, residual
     """
     # there was no identifiable expiratory location
     if x0_index >= len(flow)-1:
@@ -258,11 +262,15 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
 
     start_idx = x0_index - 1
     vols = calc_volumes(flow[start_idx:], dt)
-    flow = flow[start_idx:]
-    pressure = np.array(pressure[start_idx:])
-    pressure = pressure - pressure[0]
-    a = np.array([vols, flow, [1]*len(flow)]).transpose()
-    return _perform_least_squares(a, pressure, tvi, peep)
+    f_new = flow[start_idx:]
+    p_new = np.array(pressure[start_idx:])
+    p_new = p_new - p_new[0]
+    a = np.array([vols, f_new]).transpose()
+    least_square_result = np.linalg.lstsq(a, np.array(p_new)-peep)
+    solution = least_square_result[0]
+    elastance = solution[0]
+    plat = tvi * elastance + peep
+    return plat, 1 / elastance, solution[1], peep, least_square_result[1]
 
 
 def ikeda_time_const(flow, tvi, tve, dt):
@@ -341,14 +349,17 @@ def lourens_time_const(flow, tve, x0_index, dt, percentage_target):
 
 def pt_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
     """
-    Pressure targeted least squares. Calculate compliance, resistance, and K via standard
+    Pressure targeted least squares. Calculate compliance and resistance via standard
     single chamber model equation. Only looks at expiratory part of breath:
 
-    This method was exemplified by:
+    This method was discussed, but not directly used in:
 
     Van Drunen EJ, Chiew YS, Chase JG, Shaw GM, Lambermont B, Janssen N, Damanhuri NS, Desaive T.
     Expiratory model-based method to monitor ARDS disease state. Biomedical engineering online.
     2013 Dec 1;12(1):57.
+
+    Howe later mentions in 2020 that it's not a very good method, so we implement to show
+    improvements of Howe upon this baseline.
 
     :param flow: array vals of flow measurements in L/s
     :param vols: breath volume in L per observation of the flow array
@@ -420,11 +431,54 @@ def vicario_nieap(flow, pressure, x0_index, peep, tvi, tau):
     # return a nan if we are not going to get a sensible response from the algo.
     if (tvi/tau) + flow[x0_index-1] - flow[0] <= 0.0:
         return np.nan, np.nan, np.nan
+
     resistance = (pressure[x0_index-1] - pressure[0]) / ((tvi/tau) + flow[x0_index-1] - flow[0])
     elastance = resistance / tau
     compliance = 1 / elastance
     plat = tvi * elastance + peep
     return plat, compliance, resistance
+
+
+def vicario_nieap_tau(flow, pressure, vols, x0_index, delta_tol=.1):
+    """
+    Perform method of calculating tau as explained in Vicario's 2016
+    paper "Noninvasive estimation of alveolar pressure."
+
+    Vicario F, Buizza R, Truschel WA, Chbat NW. Noninvasive estimation
+    of alveolar pressure. In2016 38th Annual International Conference
+    of the IEEE Engineering in Medicine and Biology Society (EMBC) 2016
+    Aug 16 (pp. 2721-2724). IEEE.
+
+    :param flow: array vals of flow measurements in L/s
+    :param pressure: array vals of pressure obs
+    :param vols: breath volume in L per observation of the flow array
+    :param x0_index: index where flow crosses 0
+    :param delta_tol: fraction tolerance to approach PEEP for delta.
+                      (expressed in eq. 4 in paper)
+    """
+    # transient abnormality. just return NaN.
+    if x0_index >= len(flow)-1 or x0_index<5:
+        return np.nan
+
+    # calculate a per-breath peep because peep can fluctuate based on
+    # efforting and other factors like PRVC. Since the delta factor is
+    # so clearly based on getting as close to PEEP as possible then doing
+    # this on a breath-by-breath basis is probably best
+    peep = np.mean(pressure[-5:])
+
+    # find \delta where \delta is the "time the ventilator requires
+    # to reduce the pressure down to set PEEP." This phrasing is
+    # nebulous so what I am doing is declaring a tolerance factor to
+    # where we are close to PEEP. This maintains the intention of the
+    # paper's method.
+    delta_thesh = (peep * delta_tol) + peep
+    delta_idx = np.argmin(np.logical_not((pressure[x0_index:]<delta_thesh))) + x0_index
+
+    a = np.array([[1]*len(flow[delta_idx:])]).transpose()
+    target = -np.array(vols[delta_idx:]) / (flow[delta_idx:]-flow[0])
+    result = np.linalg.lstsq(a, target)
+    tau = result[0][0]
+    return tau
 
 
 def wiriyaporn_time_const_exp(flow, x0_index, dt):

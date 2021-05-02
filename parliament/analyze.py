@@ -53,26 +53,31 @@ class FileCalculations(object):
         """
         self.algo_mapping = {
             "al_rawas": self.al_rawas,
+            # flow targeted inspiratory least squares
             'ft_insp_lstsq': self.ft_inspiratory_least_squares,
+            # Howe's least squares
             "howe_lstsq": self.howe_least_squares,
             'iimipr': self.iimipr,
             'iipr': self.iipr,
             'iipredator': self.iipredator,
             "kannangara": self.kannangara,
-            # XXX mccay is currently working from a software perspective but the results are off.
-            # its a bit too slow and I am going to skip it for now.
+            # mccay is way too slow
             #'mccay': self.mccay,
             'major': self.major,
             'mipr': self.mipr,
             'polynomial': self.polynomial,
             'predator': self.predator,
+            # pressure targeted expiratory least squares
             "pt_exp_lstsq": self.exp_least_squares,
+            # pressure targeted inspiratory least squares
             "pt_insp_lstsq": self.insp_least_squares,
             "vicario_co": self.vicario_constrained,
-            "vicario_co_insp": self.vicario_constrained_insp_only,
+            # don't do this because its not described in the literature
+            #"vicario_co_insp": self.vicario_constrained_insp_only,
             "vicario_nieap": self.vicario_nieap,
         }
-        self.algos_with_tc = ['al_rawas', 'vicario_nieap']
+        #self.algos_with_tc = ['al_rawas', 'vicario_nieap']
+        self.algos_with_tc = []
         if algorithms_to_use == 'all' or 'all' in algorithms_to_use:
             self.algorithms_to_use = list(self.algo_mapping.keys())
         elif not isinstance(algorithms_to_use, list):
@@ -95,7 +100,6 @@ class FileCalculations(object):
         ]
         self.recorded_gold = np.nan if not recorded_compliance else recorded_compliance
         self.recorded_plat = np.nan if not recorded_plat else recorded_plat
-        # XXX want to make this into a dict eventually
         self.reconstruction_methods = {
             'iipr',
             'kannangara',
@@ -153,6 +157,7 @@ class FileCalculations(object):
             'fuzzy': self.fuzzy_clust_tau,
             'ikeda': self.ikeda_tau,
             'lourens': self.lourens_tau,
+            'vicario': self.vicario_nieap_tau,
             'wiri': self.wiriyaporn_tau,
         }
         if not kwargs.get('tc_algos'):
@@ -161,7 +166,15 @@ class FileCalculations(object):
             self.tc_algos = list(self.tc_algo_mapping.keys())
         elif isinstance(kwargs.get('tc_algos'), list):
             self.tc_algos = kwargs.get('tc_algos')
-        tc_algo_prefixes = {'al_rawas': 'ar', 'brunner': 'bru', 'lourens': 'lren', 'wiri': 'wri', 'ikeda': 'ikd', 'fuzzy': 'fuz'}
+        tc_algo_prefixes = {
+            'al_rawas': 'ar',
+            'brunner': 'bru',
+            'fuzzy': 'fuz',
+            'lourens': 'lren',
+            'ikeda': 'ikd',
+            'vicario': 'vic',
+            'wiri': 'wri',
+        }
         # this is the m_index for vicario. This is another const that is supposed to
         # be found by sensitivity analysis, but here we just set to a const
         self.vicario_co_m_idx = kwargs.get('vicario_co_m_idx', 15)
@@ -256,17 +269,17 @@ class FileCalculations(object):
             tc_results.append(algo(breath_idx, tau))
         return np.array(tc_results)
 
-    def al_rawas(self, breath_idx, tau):
+    def al_rawas(self, breath_idx):
         """
         Perform Al-Rawas' algorithm for finding compliance.
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
-        :param tau: Expiratory time constant for our breath
         """
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         vols = self._calc_breath_volume(breath_idx)
+        tau = self.al_rawas_tau(breath_idx)
         tau, plat, comp, res = al_rawas_calcs(
             flow_l_s,
             vols,
@@ -594,13 +607,13 @@ class FileCalculations(object):
             return np.nan
         return 1 / elas
 
-    def vicario_nieap(self, breath_idx, tau):
+    def vicario_nieap(self, breath_idx):
         """
         Perform vicario's method for NonInvasive Estimation of Alveolar Pressure (NIEAP).
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
-        :param tau: Expiratory time constant for our breath
         """
+        tau = self.vicario_nieap_tau(breath_idx)
         if tau is np.nan:
             return np.nan
         breath = self.breath_data[breath_idx]
@@ -608,11 +621,24 @@ class FileCalculations(object):
         flow_l_s = np.array(breath['flow']) / 60
         pressure = breath['pressure']
         tvi = bm.tvi / 1000
+        peep = self._get_median_peep(breath_idx)
         # Have option of using a variety of time constants, but lets just use al-rawas for now.
         # We can add configurability in the future.
-        peep = self._get_median_peep(breath_idx)
         plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
         return comp
+
+    def vicario_nieap_tau(self, breath_idx):
+        """
+        Perform method of calculating tau as explained in Vicario's 2016
+        paper "Noninvasive estimation of alveolar pressure."
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        bm = self.breath_metadata[breath_idx]
+        vols = self._calc_breath_volume(breath_idx)
+        flow_l_s = np.array(breath['flow']) / 60
+        return vicario_nieap_tau(flow_l_s, breath['pressure'], vols, bm.x0_index)
 
     def wiriyaporn_tau(self, breath_idx):
         """

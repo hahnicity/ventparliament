@@ -136,17 +136,35 @@ class ResultsContainer(object):
         self.calc_wmd(self.proc_results)
 
         async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0) | (self.proc_results.static_dca != 0) | (self.proc_results.dyn_dca != 0))
+
+        # analyze all per patient breaths
         self.pp_all = self.analyze_per_patient_df(self.proc_results)
+
+        # analyze non-asynchronous breaths
+        all_no_async = self.proc_results[~async_mask]
+        self.pp_no_async = self.analyze_per_patient_df(all_no_async)
+
+        # analyze only volume control breaths
         self.bb_vc_only = self.proc_results[self.proc_results.ventmode == 'vc']
         self.pp_vc_only = self.analyze_per_patient_df(self.bb_vc_only)
+
+        # analyze only pressure breathing
         self.bb_pressure_only = self.proc_results[self.proc_results.ventmode.isin(['pc', 'prvc'])]
         self.pp_pressure_only = self.analyze_per_patient_df(self.bb_pressure_only)
+
+        # analyze all asynchronous breathing
         self.bb_async_results = self.proc_results[async_mask]
         self.pp_async_results = self.analyze_per_patient_df(self.bb_async_results)
+
+        # analyze all artifact breathing
         self.bb_artifacts = self.proc_results[self.proc_results.artifact != 0]
         self.pp_artifacts = self.analyze_per_patient_df(self.bb_artifacts)
+
+        # analyze asynchronous breathing, VC only
         self.bb_vc_only_async = self.proc_results[(self.proc_results.ventmode == 'vc') & async_mask]
         self.pp_vc_only_async = self.analyze_per_patient_df(self.bb_vc_only_async)
+
+        # analyze pressure related breathing. PC/PRVC
         self.bb_pressure_only_async = self.proc_results[(self.proc_results.ventmode != 'vc') & async_mask]
         self.pp_pressure_only_async = self.analyze_per_patient_df(self.bb_pressure_only_async)
         self.full_analysis_done = True
@@ -288,6 +306,21 @@ class ResultsContainer(object):
             table.add_row([stat, val])
         print(table)
 
+    def get_masks(self):
+        return {
+            'async': (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa != 0) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            ),
+            'vc_only': (self.proc_results.ventmode == 'vc'),
+            'pc_only': (self.proc_results.ventmode == 'pc'),
+            'prvc_only': (self.proc_results.ventmode == 'prvc'),
+            'pc_prvc': self.proc_results.ventmode.isin(['pc', 'prvc']),
+        }
+
     def preprocess_mad_std_in_df(self, df, use_wmd):
         # Do scatter of MAD by std
         mad_std = {algo: [[], [], None, None, None] for algo in self.algos_used}
@@ -314,13 +347,12 @@ class ResultsContainer(object):
             mad_std[algo][4] = mean_mad+mean_std
             algo_dists.append(mean_mad+mean_std)
 
-        # sort items so we can give them higher z order based on precedence
-        algo_ordering = np.argsort(np.array(algo_dists))
         algos_used = [algo for algo in copy(self.algos_used) if algo in mad_std]
-        algos_in_order = np.array(algos_used)[algo_ordering]
+        # sort by alphabetical order
+        algos_in_order = sorted(algos_used)
         return mad_std, algos_in_order
 
-    def plot_algo_scatter(self, df, use_wmd, plt_title, figname, individual_patients):
+    def plot_algo_scatter(self, df, use_wmd, plt_title, figname, individual_patients, std_lim):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
@@ -364,9 +396,9 @@ class ResultsContainer(object):
         ax.tick_params(axis='y', labelsize=14)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
-        if len(x) > 1:
-            ax.set_xlim(-.1, np.mean(x)+1.5*np.std(x))
-            ax.set_ylim(-.4, np.mean(y)+1.5*np.std(y))
+        if std_lim is not None and len(x) > 1:
+            ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
+            ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
         fig.legend(fontsize=16, loc='center right')
         ax.grid()
         ax.set_title(plt_title, fontsize=20)
@@ -400,18 +432,15 @@ class ResultsContainer(object):
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
         # XXX add WMD option
         diff_cols = ["{}_diff".format(algo) for algo in self.algos_used]
-        # remember conf interval only gives you relative confidence of where the median is
-        # it wont tell you anything about IQR and how widely the data is distributed.
-        medians, conf = self.extract_confidence_intervals(df[diff_cols])
-        # its not a perfect system, but it'll do for now. Perform ordering based on euclidean dist
-        # of median and std.
-        stds = df[diff_cols].std().values.round(5)
-        sorted_dist_idxs = np.argsort(medians**2 + stds**2)
-        sorted_diff_cols = [diff_col for diff_col in np.array(diff_cols)[sorted_dist_idxs]]
-        algos_in_order = [algo.replace('_diff', '') for algo in sorted_diff_cols]
-        self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians[sorted_dist_idxs], conf[sorted_dist_idxs], notch=True, bootstrap=self.boot_resamples)
+        sorted_diff_cols = sorted(diff_cols)
+        medians, conf = self.extract_confidence_intervals(df[sorted_diff_cols])
+        stds = df[sorted_diff_cols].std().values.round(5)
+
+        # alphabetical order again
+        algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
+        self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians, conf, notch=True, bootstrap=self.boot_resamples)
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
-        plt.setp(xtick_names, rotation=30, fontsize=14)
+        plt.setp(xtick_names, rotation=60, fontsize=14)
         # XXX redo labeling
         ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
@@ -422,10 +451,10 @@ class ResultsContainer(object):
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
         table = PrettyTable()
         table.field_names = ['algo', 'median diff', '95% conf_lower', '95% conf_upper', 'std']
-        medians = medians.round(5)
-        conf = conf.round(5)
+        medians = medians.round(2)
+        conf = conf.round(2)
         for i, algo in enumerate(algos_in_order):
-            table.add_row([algo, medians[sorted_dist_idxs][i], conf[sorted_dist_idxs][i, 0], conf[sorted_dist_idxs][i, 1], stds[sorted_dist_idxs][i]])
+            table.add_row([algo, medians[i], conf[i, 0], conf[i, 1], stds[i]])
         display(HTML('<h2>{}</h2>'.format(title)))
         display(HTML(table.get_html_string()))
 
@@ -453,32 +482,49 @@ class ResultsContainer(object):
             'pressure_only_async_breath_by_breath_results.png'
         )
 
-    def plot_per_patient_results(self, use_wmd, individual_patients=False, show_boxplots=True):
+    def plot_per_patient_results(self, use_wmd, individual_patients=False, show_boxplots=True, std_lim=None):
         """
         Plot patient by patient results
 
         :param use_wmd: use wmd or no?
         :param individual_patients: show individual_patients scatter points
         :param show_boxplots: show boxplots after scatter plots
+        :param std_lim: limit graphs by standard deviation within certain
+                        factor. Normally is set to None (no limit). But can be
+                        set to any floating value > 0.
         """
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all, use_wmd, 'Patient by patient results. No filters', 'patient_by_patient_result.png', individual_patients)
+        # Patient by Patient. All breathing
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all, use_wmd, 'Patient by patient results. No filters', 'patient_by_patient_result.png', individual_patients, std_lim)
         if show_boxplots:
             self.plot_algo_mad_std_boxplots(self.pp_all, algos_in_order, use_wmd, 'patient_by_patient')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, use_wmd, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png', individual_patients)
+
+        # Patient by patient. no asynchronies
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_no_async, use_wmd, 'Patient by patient results. No Asynchronies', 'patient_by_patient_no_async_result.png', individual_patients, std_lim)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_no_async, algos_in_order, use_wmd, 'patient_by_patient_no_async')
+
+        # VC only patient by patient.
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, use_wmd, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png', individual_patients, std_lim)
         if show_boxplots:
             self.plot_algo_mad_std_boxplots(self.pp_vc_only, algos_in_order, use_wmd, 'vc_only_pbp')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png', individual_patients)
+
+        # PC/PRVC only
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png', individual_patients, std_lim)
+
         if show_boxplots:
             self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
-        # plot out asynchronies and artifacts across the entire cohort. We likely will not
-        # have enough data to draw any conclusions about artifacts
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_async_results, use_wmd, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png', individual_patients)
+
+        # Asynchronies only
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_async_results, use_wmd, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png', individual_patients, std_lim)
         if show_boxplots:
             self.plot_algo_mad_std_boxplots(self.pp_async_results, algos_in_order, use_wmd, 'asynchronies_only_pbp')
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, use_wmd, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png', individual_patients)
+
+        # Artifacts only
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, use_wmd, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png', individual_patients, std_lim)
+
         # group asynchronies/artifacts by mode
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, use_wmd, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png', individual_patients)
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png', individual_patients)
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, use_wmd, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png', individual_patients, std_lim)
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png', individual_patients, std_lim)
 
         # I go back and forth in between questioning whether this belongs here or in per_patient
         if show_boxplots:
@@ -499,6 +545,18 @@ class ResultsContainer(object):
             self.results_dir.mkdir()
         pd.to_pickle(self, str(self.results_dir.joinpath('ResultsContainer.pkl')))
 
+    def visualize_patient(self, patient, algos, extra_mask=None):
+        columns = algos + ['gold_stnd_compliance']
+        if not isinstance(extra_mask, type(None)):
+            patient_df = self.proc_results[(self.proc_results.patient == patient) & extra_mask][columns]
+        else:
+            patient_df = self.proc_results[self.proc_results.patient == patient][columns]
+        patient_df.plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=14)
+        plt.title(patient, fontsize=20)
+        plt.plot(patient_df.gold_stnd_compliance, label='gt')
+        plt.show()
+        plt.close()
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -509,6 +567,7 @@ def main():
     parser.add_argument('-ltc', '--lourens-tc-choice', type=int, default=50)
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
     parser.add_argument('--cvc-only', action='store_true', help='only analyze cvc data')
+    parser.add_argument('--no-cvc', action='store_true', help='dont analyze cvc data')
 
     args = parser.parse_args()
 
@@ -519,6 +578,9 @@ def main():
 
     for dir_ in sorted(list(all_patient_dirs)):
         if args.cvc_only and 'cvc' not in str(dir_):
+            continue
+
+        if args.no_cvc and 'cvc' in str(dir_):
             continue
 
         patient_id = dir_.name
@@ -544,18 +606,6 @@ def main():
             results.add_results_df(patient_id, calcs.results)
     results.collate_data(calcs.algos_used)
     results.save_results()
-
-#    # XXX debug
-    import matplotlib.pyplot as plt
-    patient_results = results.proc_results
-    results.analyze_results()
-    for pt, df in results.proc_results.groupby('patient_id'):
-        wm_cols = ['{}_wm'.format(algo) for algo in calcs.algos_used]
-        df[wm_cols].plot(title=pt, figsize=(3*8, 4*3), fontsize=6, colormap=cc.cm.glasbey)
-        gt = patient_results['gold_stnd_compliance']
-        plt.plot(gt, label='gt')
-        plt.show()
-        plt.close()
 
 
 if __name__ == '__main__':
