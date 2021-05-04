@@ -31,6 +31,24 @@ class MetadataRow(object):
 
 
 class FileCalculations(object):
+    # friendly names for the algorithms
+    algo_name_mapping = {
+        'al_rawas': 'Al-Rawas',
+        'ft_insp_lstsq': 'Flow-targeted Inspiratory Least Squares',
+        'howe_lstsq': "Howe Least Squares",
+        'iimipr': 'IIMIPR',
+        'iipr': 'IIPR',
+        'iipredator': 'IIPredator',
+        'kannangara': 'Kannangara Pressure Mode Correction',
+        'major': "Major",
+        'mipr': 'MIPR',
+        'polynomial': 'Polynomial Method',
+        'predator': 'PREDATOR',
+        'pt_exp_lstsq': 'Pressure Targeted Expiratory Least Squares',
+        'pt_insp_lstsq': 'Pressure Targeted Inspiratory Least Squares',
+        'vicario_co': 'Vicario Constrained Optimization',
+        'vicario_nieap': 'Vicario Non-Invasive Estimation of Alveolar Pressure',
+    }
     algos_unavailable_for_pc_prvc = [
         'iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'major',
         'polynomial', 'pt_insp_lstsq', 'howe_lstsq', 'pt_exp_lstsq',

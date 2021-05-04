@@ -467,7 +467,32 @@ class ResultsContainer(object):
         fig.legend(fontsize=16, loc='center right')
         ax.grid()
         ax.set_title(plt_title, fontsize=20)
-        fig.savefig(str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd)), dpi=self.dpi)
+        figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd))
+        fig.savefig(figname, dpi=self.dpi)
+
+        # show table of boxplot results
+        table = PrettyTable()
+        table.field_names = ['Algorithm', 'Shorthand Name', 'MAD (Median Absolute Deviation)', 'Standard Deviation (std)']
+        medians = np.array([mad_std[algo][2] for algo in algos_in_order])
+        stds = np.array([mad_std[algo][3] for algo in algos_in_order])
+        medians = medians.round(2)
+        stds = stds.round(2)
+        for i, algo in enumerate(algos_in_order):
+            table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], stds[i]])
+
+        soup = BeautifulSoup(table.get_html_string())
+        min_median = np.nanargmin(medians)
+        min_std = np.nanargmin(stds)
+        # the +1 is because the header is embedded in a <tr> element
+        min_med_elem = soup.find_all('tr')[min_median+1]
+        min_std_elem = soup.find_all('tr')[min_std+1]
+
+        self._change_td_to_bold(soup, min_med_elem.find_all('td')[2])
+        self._change_td_to_bold(soup, min_std_elem.find_all('td')[3])
+
+        display(HTML('<h2>{}</h2>'.format(plt_title)))
+        display(HTML(soup.prettify()))
+        plt.show(fig)
         return mad_std, algos_in_order
 
     def plot_algo_mad_std_boxplots(self, df, algo_ordering, use_wmd, figname_prefix):
@@ -515,24 +540,22 @@ class ResultsContainer(object):
         title = figname.replace('.png', '').replace('_', ' ')
         ax.set_title(title, fontsize=20)
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
+
+        # show table of boxplot results
         table = PrettyTable()
-        table.field_names = ['Algorithm', 'Median Diff', '25% IQR', '75% IQR', 'std']
+        table.field_names = ['Algorithm', 'Shorthand Name', 'Median Diff', '25% IQR', '75% IQR', 'std']
         medians = medians.round(2)
         iqr = iqr.round(2)
         stds = stds.round(2)
         for i, algo in enumerate(algos_in_order):
             if not np.isnan(medians[i]):
-                table.add_row([algo, medians[i], iqr[i, 0], iqr[i, 1], stds[i]])
+                table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], iqr[i, 0], iqr[i, 1], stds[i]])
             else:
-                table.add_row([algo, '-', '-', '-', '-'])
+                table.add_row([FileCalculations.algo_name_mapping[algo], algo, '-', '-', '-', '-'])
 
-        # XXX perform boldface formatting with best median/iqr
-        #
-        # How to do? There's got to be a method that's been done before.
-        # Why don't you just do something for now to get the code down and
-        # then refine your method later.
         soup = BeautifulSoup(table.get_html_string())
         min_median = np.nanargmin(abs(medians))
+        # XXX in the future we should revisit this before publication
         min_iqr_rel_to_0 = np.nanargmin(abs(iqr).sum(axis=1))
         min_std = np.nanargmin(stds)
         # the +1 is because the header is embedded in a <tr> element
@@ -540,10 +563,10 @@ class ResultsContainer(object):
         min_iqr_elem = soup.find_all('tr')[min_iqr_rel_to_0+1]
         min_std_elem = soup.find_all('tr')[min_std+1]
 
-        self._change_td_to_bold(soup, min_med_elem.find_all('td')[1])
-        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[2])
+        self._change_td_to_bold(soup, min_med_elem.find_all('td')[2])
         self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[3])
-        self._change_td_to_bold(soup, min_std_elem.find_all('td')[4])
+        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[4])
+        self._change_td_to_bold(soup, min_std_elem.find_all('td')[5])
 
         display(HTML('<h2>{}</h2>'.format(title)))
         display(HTML(soup.prettify()))
