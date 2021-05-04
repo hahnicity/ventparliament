@@ -1,3 +1,4 @@
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -161,6 +162,10 @@ class FileCalculations(object):
         self.lourens_tc_choice = kwargs.get('lourens_tc_choice', 50)
         # number of iters to run mipr for
         self.mipr_iters = kwargs.get('mipr_iters', 20)
+        # this is a float that corresponds to what kind of tolerance we are looking for
+        # when we attempt look for where effort is being made on expiratory lim of
+        # breath
+        self.peep_tolerance = kwargs.get('peep_tolerance', .5)
         # This is a constant used in PREDATOR to determine how many breaths backward we
         # should be looking to make our approximation of the pressure (or flow) curve
         self.predator_n_breaths = kwargs.get('predator_n_breaths', 5)
@@ -178,6 +183,8 @@ class FileCalculations(object):
             'vicario': self.vicario_nieap_tau,
             'wiri': self.wiriyaporn_tau,
         }
+        self.tvis = []
+        self.tvis_len = kwargs.get('tvis_len', 3)
         if not kwargs.get('tc_algos'):
             self.tc_algos = ['al_rawas']
         elif kwargs.get('tc_algos') == ['all'] or kwargs.get('tc_algos') == 'all':
@@ -193,6 +200,8 @@ class FileCalculations(object):
             'vicario': 'vic',
             'wiri': 'wri',
         }
+        # breath file ventmodes so we dont have to keep recalculating
+        self.ventmodes = dict()
         # this is the m_index for vicario. This is another const that is supposed to
         # be found by sensitivity analysis, but here we just set to a const
         self.vicario_co_m_idx = kwargs.get('vicario_co_m_idx', 15)
@@ -203,9 +212,10 @@ class FileCalculations(object):
         # setup results data list
         self.results = []
         self.results_cols = [
-            'patient', 'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta', 'bsa',
-            'fa', 'fa_loc', 'static_dca', 'dyn_dca', 'dyn_dca_timing', 'artifact',
-            'peep', 'tvi', 'p_plat', 'p_driving'
+            'patient', 'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta',
+            'bsa', 'fa', 'fa_loc', 'static_dca', 'dyn_dca', 'dyn_dca_timing', 'artifact',
+            'early_efforting', 'insp_efforting', 'exp_efforting', 'peep', 'tvi', 'p_plat',
+            'p_driving'
         ]
         non_algo_cols = len(self.results_cols)
         for algo in self.algorithms_to_use:
@@ -232,13 +242,37 @@ class FileCalculations(object):
             self.breath_volumes[breath_idx] = vols
             return vols
 
-    def _get_median_peep(self, breath_idx):
+    def _get_breath_peep(self, breath_idx):
+        """
+        Get PEEP for the breath. Generally uses a median algorithm to find this,
+        but for PRVC it just utilizes the current breath.
+
+        Theres an argument to be made that you can balance when to use median PEEP
+        versus when to use per-breath PEEP. Then there's additional circumstances
+        when there's too much asynchrony and median peep is wrecked there. So you
+        would need to use the last calculated PEEP at a stable time.
+
+        It's totally possible that a decent algorithm would be a set it and forget
+        it until you can't kind of idea. Where you set the PEEP, and then only revisit
+        it if the calculations are too off for too long. But of course the details on
+        this get equally tricky.
+        """
         # implement caching because we can have multiple algos looking for same peep
         if breath_idx in self.peeps:
             return self.peeps[breath_idx]
 
-        min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
-        peep = np.median([row.PEEP for row in self.breath_metadata[min_idx:breath_idx+1]])
+        breath = self.breath_data[breath_idx]
+        rel_bn = breath['rel_bn']
+        ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
+        ventmode = ei_row.ventmode
+        per_breath_peep = np.mean(breath['pressure'][-5:])
+
+        if ventmode == 'prvc':
+            peep = per_breath_peep
+        else:
+            min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
+            peep = np.median([row.PEEP for row in self.breath_metadata[min_idx:breath_idx+1]])
+
         self.peeps[breath_idx] = peep
         return peep
 
@@ -250,7 +284,7 @@ class FileCalculations(object):
         bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
         plat, compliance, res, K, residual = func(
             flow_l_s, vols, pressure, bm.x0_index, self.dt, peep, bm.tvi/1000.0
@@ -264,7 +298,7 @@ class FileCalculations(object):
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
         plat, comp, res, K, resid = pt_inspiratory_least_squares(
             flow, vols, reconstructed_pressure, bm.x0_index, self.dt, peep, bm.tvi
@@ -305,7 +339,7 @@ class FileCalculations(object):
             bm.x0_index,
             self.dt,
             bm.PIP,
-            self._get_median_peep(breath_idx),
+            self._get_breath_peep(breath_idx),
             bm.tvi/1000.0,
             self.al_rawas_idx,
             self.al_rawas_tol,
@@ -336,6 +370,101 @@ class FileCalculations(object):
         # for our purpose currently we will not implement this. We can move to optimizations later.
         tau = brunner(bm.tve/1000, bm.eTime, abs(min(breath['flow'])/60), self.brunner_iters)
         return tau
+
+    def check_for_early_efforting(self, breath_idx):
+        """
+        Check for early efforting in the breath by searching for the following condition:
+
+        PEEP - P0 > 1 cm/H20
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        ventmode = self.ventmodes[breath_idx]
+        # if we don't have enough breaths in our file to capture an informed PEEP
+        # then we can't pretend that we know efforting is happening.
+        if breath_idx < self.peeps_to_use and ventmode != 'prvc':
+            return 0
+
+        breath = self.breath_data[breath_idx]
+        peep = self._get_breath_peep(breath_idx)
+        pressure = breath['pressure']
+        # looking through this, vent disconnects are the most common form
+        # of CVC breath that messes this rule up. But then again, that's
+        # not a big deal because we can just filter them. with the vd algo.
+        if peep - pressure[0] >= 1:
+            return 1
+        else:
+            return 0
+
+    def check_for_inspiratory_efforting(self, breath_idx):
+        """
+        Check for following conditions:
+
+        VC: flow asynchrony
+        PC/PRVC: TVi variation > 10% for 3 breath rolling average.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        breath = self.breath_data[breath_idx]
+        rel_bn = breath['rel_bn']
+        ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
+        ventmode = self.ventmodes[breath_idx]
+        if ventmode == 'vc' and ei_row.fa > 0:
+            return 1
+        elif ventmode == 'vc':
+            return 0
+        elif ventmode in ['pc', 'prvc'] and len(self.tvis) == 0:
+            bm = self.breath_metadata[breath_idx]
+            self.tvis.append(bm.tvi)
+            return 0
+        elif ventmode in ['pc', 'prvc']:
+            if len(self.tvis) == self.tvis_len:
+                self.tvis.pop(0)
+
+            bm = self.breath_metadata[breath_idx]
+            self.tvis.append(bm.tvi)
+            diffs = abs(np.diff(np.array(list(combinations(self.tvis, 2)))))
+            if (diffs > np.array(self.tvis)*.1).any():
+                return 1
+        else:
+            return 0
+
+    def check_for_late_efforting(self, breath_idx):
+        """
+        Check for late efforting in the breath by searching for the following condition:
+
+        Pressure +/- 1 from set PEEP during negative flow.
+
+        This only counts for a certain time after the pressure reaches close to PEEP.
+        Otherwise this condition would be true on every breath immediately after x0.
+
+        :param breath_idx: relative index of the breath we want to analyze in our file.
+        """
+        ventmode = self.ventmodes[breath_idx]
+        # if we dont know peep, then dont bother looking at this
+        if breath_idx < self.peeps_to_use and ventmode != 'prvc':
+            return 0
+
+        peep = self._get_breath_peep(breath_idx)
+        pressure = np.array(self.breath_data[breath_idx]['pressure'])
+        delta_thesh = self.peep_tolerance + peep
+        bm = self.breath_metadata[breath_idx]
+        x0_index = bm.x0_index
+
+        # this could be due to transient artifact or asynchrony. In either case just
+        # return nothing and let other asynchrony/artifact algos do their work.
+        if len(pressure[x0_index:]) <= 10:
+            return 0
+
+        # the reason why x0_index+10 is here is because there can be recoil forces
+        # acting upon the lung immediately during expiration.
+        delta_idx = np.argmin(np.logical_not((pressure[x0_index+10:]<delta_thesh))) + x0_index+10
+        # the peep algo actually works pretty well. The problems occur when peep is
+        # changed, and then the median takes a bit of time to catch up.
+        if (peep-1 > pressure[delta_idx:]).any() or (peep+1 < pressure[delta_idx:]).any():
+
+            return 1
+        return 0
 
     def exp_least_squares(self, breath_idx):
         """
@@ -388,7 +517,7 @@ class FileCalculations(object):
         else:
             pressure = self.iipr_pressure_reconstruction(breath_idx)
         flow = np.array(breath['flow']) / 60
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
         comp, resist, residual, code = perform_mipr(flow, vols, pressure, bm.x0_index, peep, self.dt, self.mipr_iters)
         return comp
@@ -405,7 +534,7 @@ class FileCalculations(object):
         bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
         com, resist, residual, code = perform_iipr_algo(flow, vols, pressure, bm.x0_index, peep, self.dt)
         return com
@@ -444,7 +573,7 @@ class FileCalculations(object):
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         pressure = breath['pressure']
         vols = self._calc_breath_volume(breath_idx)
         recon, code = perform_iipr_pressure_reconstruction(flow, vols, pressure, bm.x0_index, peep, self.dt)
@@ -485,7 +614,7 @@ class FileCalculations(object):
         breath = self.breath_data[breath_idx]
         bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60.0
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
         sols = kannangara(flow, vols, breath['pressure'], bm.x0_index, peep, self.dt, self.kannangara_thresh)
         # return compliance only
@@ -523,7 +652,7 @@ class FileCalculations(object):
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
         breath = self.breath_data[breath_idx]
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         self.mccay_interface.analyze_breath(breath, peep)
         return self.mccay_interface.results[breath['rel_bn']]['mean_compliance']
 
@@ -537,7 +666,7 @@ class FileCalculations(object):
         bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         vols = self._calc_breath_volume(breath_idx)
         comp, resist, residual, code = perform_mipr(flow, vols, pressure, bm.x0_index, peep, self.dt, self.mipr_iters)
         return comp
@@ -552,7 +681,7 @@ class FileCalculations(object):
         bm = self.breath_metadata[breath_idx]
         flow = np.array(breath['flow']) / 60
         pressure = np.array(breath['pressure'])
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         tvi = bm.tvi/1000
         vols = self._calc_breath_volume(breath_idx)
         comp, resist, resid, code = perform_polynomial_model(flow, vols, pressure, bm.x0_index, peep, tvi)
@@ -639,7 +768,7 @@ class FileCalculations(object):
         flow_l_s = np.array(breath['flow']) / 60
         pressure = breath['pressure']
         tvi = bm.tvi / 1000
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         # Have option of using a variety of time constants, but lets just use al-rawas for now.
         # We can add configurability in the future.
         plat, comp, res = vicario_nieap(flow_l_s, pressure, bm.x0_index, peep, tvi, tau)
@@ -687,8 +816,15 @@ class FileCalculations(object):
         abs_bs = breath['abs_bs']
         ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
         tvi = bm.tvi
-        peep = self._get_median_peep(breath_idx)
+        peep = self._get_breath_peep(breath_idx)
         ventmode = ei_row.ventmode
+        self.ventmodes[breath_idx] = ventmode
+
+        # look for generic efforting
+        early_efforting = self.check_for_early_efforting(breath_idx)
+        insp_efforting = self.check_for_inspiratory_efforting(breath_idx)
+        exp_efforting = self.check_for_late_efforting(breath_idx)
+
         if ei_row.is_valid_plat == 1:
             # we can relax the search criteria a bit for plats here because we already know
             # where the proper plats are. Now the only thing we need is to calc the actual
@@ -705,13 +841,15 @@ class FileCalculations(object):
             breath_results = [
                 self.patient, rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa,
                 ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
-                ei_row.artifact, peep, tvi, plat, plat-peep,
+                ei_row.artifact, early_efforting, insp_efforting, exp_efforting, peep,
+                tvi, plat, plat-peep,
             ]
         else:
             breath_results = [
                 self.patient, rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa,
                 ei_row.fa, ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
-                ei_row.artifact, peep, tvi, self.recorded_plat, self.recorded_plat-peep,
+                ei_row.artifact, early_efforting, insp_efforting, exp_efforting, peep,
+                tvi, self.recorded_plat, self.recorded_plat-peep,
             ]
 
         for algo in self.algorithms_to_use:

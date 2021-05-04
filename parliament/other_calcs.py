@@ -472,8 +472,8 @@ def vicario_nieap_tau(flow, pressure, vols, x0_index, delta_tol=.1):
     # nebulous so what I am doing is declaring a tolerance factor to
     # where we are close to PEEP. This maintains the intention of the
     # paper's method.
-    delta_thesh = (peep * delta_tol) + peep
-    delta_idx = np.argmin(np.logical_not((pressure[x0_index:]<delta_thesh))) + x0_index
+    delta_thresh = (peep * delta_tol) + peep
+    delta_idx = np.argmin(np.logical_not((pressure[x0_index:]<delta_thresh))) + x0_index
 
     a = np.array([[1]*len(flow[delta_idx:])]).transpose()
     target = -np.array(vols[delta_idx:]) / (flow[delta_idx:]-flow[0])
