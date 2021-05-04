@@ -10,6 +10,7 @@ import sys
 import traceback
 from warnings import warn
 
+from bs4 import BeautifulSoup
 import colorcet as cc
 from IPython.core.display import display, HTML
 import matplotlib.pyplot as plt
@@ -38,7 +39,7 @@ class ResultsContainer(object):
         self.wmd_n = wmd_n
         self.full_analysis_done = False
 
-    def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians, conf, **kwargs):
+    def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians, **kwargs):
         """
         Basically an exact replica of what happens in seaborn except for support of conf intervals
         and usermedians
@@ -65,22 +66,27 @@ class ResultsContainer(object):
                                      positions=[i],
                                      widths=plotter.width,
                                      usermedians=[medians[i]],
-                                     conf_intervals=[conf[i]],
                                      **kwargs)
             color = plotter.colors[i]
             plotter.restyle_boxplot(artist_dict, color, props)
 
     def _bootstrap(self, col_vals):
-        # determine 95% confidence intervals of the median
+        """
+        So the bootstrapping procedure here is that we bootstrap the
+        vector N times, then take the median from each vector n_i. After
+        that we take the median again to return final result. We perform
+        this same process with the IQR as well.
+        """
         M = len(col_vals)
-        percentiles = [2.5, 97.5]
+        percentiles = (25, 75)
 
         bs_index = np.random.randint(M, size=(self.boot_resamples, M))
         bsData = col_vals[bs_index]
         estimate = np.nanmedian(bsData, axis=1, overwrite_input=True)
 
-        CI = np.percentile(estimate, percentiles)
-        return CI, np.median(estimate)
+        # this is basically the same thing that scipy.stats.iqr does
+        iqr = np.median(np.nanpercentile(bsData, percentiles, axis=1), axis=1)
+        return np.median(estimate), iqr
 
     @classmethod
     def load_from_experiment_name(cls, experiment_name):
@@ -141,35 +147,68 @@ class ResultsContainer(object):
         self.pp_all = self.analyze_per_patient_df(self.proc_results)
 
         # analyze non-asynchronous breaths
-        all_no_async = self.proc_results[~async_mask]
-        self.pp_no_async = self.analyze_per_patient_df(all_no_async)
-
-        # analyze only volume control breaths
-        self.bb_vc_only = self.proc_results[self.proc_results.ventmode == 'vc']
-        self.pp_vc_only = self.analyze_per_patient_df(self.bb_vc_only)
-
-        # analyze only pressure breathing
-        self.bb_pressure_only = self.proc_results[self.proc_results.ventmode.isin(['pc', 'prvc'])]
-        self.pp_pressure_only = self.analyze_per_patient_df(self.bb_pressure_only)
+        self.bb_no_async = self.proc_results[~async_mask]
+        self.pp_no_async = self.analyze_per_patient_df(self.bb_no_async)
 
         # analyze all asynchronous breathing
         self.bb_async_results = self.proc_results[async_mask]
         self.pp_async_results = self.analyze_per_patient_df(self.bb_async_results)
 
+        # analyze only volume control breaths
+        self.bb_vc_only = self.proc_results[self.proc_results.ventmode == 'vc']
+        self.pp_vc_only = self.analyze_per_patient_df(self.bb_vc_only)
+
         # analyze all artifact breathing
         self.bb_artifacts = self.proc_results[self.proc_results.artifact != 0]
         self.pp_artifacts = self.analyze_per_patient_df(self.bb_artifacts)
+
+        # analyze non-asynchronous breathing VC only
+        self.bb_vc_no_async = self.proc_results[(self.proc_results.ventmode == 'vc') & ~async_mask]
+        self.pp_vc_no_async = self.analyze_per_patient_df(self.bb_vc_no_async)
 
         # analyze asynchronous breathing, VC only
         self.bb_vc_only_async = self.proc_results[(self.proc_results.ventmode == 'vc') & async_mask]
         self.pp_vc_only_async = self.analyze_per_patient_df(self.bb_vc_only_async)
 
-        # analyze pressure related breathing. PC/PRVC
-        self.bb_pressure_only_async = self.proc_results[(self.proc_results.ventmode != 'vc') & async_mask]
-        self.pp_pressure_only_async = self.analyze_per_patient_df(self.bb_pressure_only_async)
+        # analyze all PC only
+        self.bb_pc_only = self.proc_results[(self.proc_results.ventmode == 'pc')]
+        self.pp_pc_only = self.analyze_per_patient_df(self.bb_pc_only)
+
+        # analyze non-asynchronous breathing PC only
+        self.bb_pc_no_async = self.proc_results[(self.proc_results.ventmode == 'pc') & ~async_mask]
+        self.pp_pc_no_async = self.analyze_per_patient_df(self.bb_pc_no_async)
+
+        # analyze asynchronous breathing PC only
+        self.bb_pc_only_async = self.proc_results[(self.proc_results.ventmode == 'pc') & async_mask]
+        self.pp_pc_only_async = self.analyze_per_patient_df(self.bb_pc_only_async)
+
+        # analyze all PRVC only
+        self.bb_prvc_only = self.proc_results[(self.proc_results.ventmode == 'prvc')]
+        self.pp_prvc_only = self.analyze_per_patient_df(self.bb_prvc_only)
+
+        # analyze non-asynchronous breathing PRVC only
+        self.bb_prvc_no_async = self.proc_results[(self.proc_results.ventmode == 'prvc') & ~async_mask]
+        self.pp_prvc_no_async = self.analyze_per_patient_df(self.bb_prvc_no_async)
+
+        # analyze asynchronous breathing PRVC only
+        self.bb_prvc_only_async = self.proc_results[(self.proc_results.ventmode == 'prvc') & async_mask]
+        self.pp_prvc_only_async = self.analyze_per_patient_df(self.bb_prvc_only_async)
+
+        # analyze only pressure breathing
+        self.bb_all_pressure_only = self.proc_results[self.proc_results.ventmode.isin(['pc', 'prvc'])]
+        self.pp_all_pressure_only = self.analyze_per_patient_df(self.bb_all_pressure_only)
+
+        # analyze non-asynchronous pressure related breathing. PC/PRVC
+        self.bb_all_pressure_no_async = self.proc_results[(self.proc_results.ventmode.isin(['pc', 'prvc'])) & ~async_mask]
+        self.pp_all_pressure_no_async = self.analyze_per_patient_df(self.bb_all_pressure_no_async)
+
+        # analyze asynchronous pressure related breathing. PC/PRVC
+        self.bb_all_pressure_only_async = self.proc_results[(self.proc_results.ventmode.isin(['pc', 'prvc'])) & async_mask]
+        self.pp_all_pressure_only_async = self.analyze_per_patient_df(self.bb_all_pressure_only_async)
+
+        # save a processed results container because this method takes the
+        # longest time out of all the other methods to run
         self.full_analysis_done = True
-        # save a processed results container because this method takes the longest
-        # time out of all the other methods
         pd.to_pickle(self, self.results_dir.joinpath('ResultsContainer.pkl'))
 
     def calc_wmd(self, df):
@@ -223,14 +262,14 @@ class ResultsContainer(object):
                 # removing any results that may be within range of the actual ground truth
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 15*algo_mad)].index, algo] = np.nan
 
-    def extract_confidence_intervals(self, df):
+    def extract_medians_and_iqr(self, df):
         medians = []
-        conf_intervals = []
+        iqrs = []
         for col in df.columns:
-            ci, med = self._bootstrap(df[col].values)
-            conf_intervals.append(ci)
+            med, iqr = self._bootstrap(df[col].values)
+            iqrs.append(iqr)
             medians.append(med)
-        return np.array(medians), np.array(conf_intervals)
+        return np.array(medians), np.array(iqrs)
 
     def extract_descriptive_statistics(self):
         """
@@ -263,6 +302,18 @@ class ResultsContainer(object):
             'mean vc async per patient',
             'mean pc async per patient',
             'mean prvc async per patient',
+            # deeper dive into asynchronies
+            'total dta breaths',
+            'total bsa breaths',
+            'total fa breaths',
+            'total static/dynamic dca breaths',
+            'total static dca breaths',
+            'total dynamic dca breaths',
+            # proportions of each async out of total async
+            'proportion dta of async',
+            'proportion bsa of async',
+            'proportion fa of async',
+            'proportion static/dynamic dca of async',
         ]
         n_patients = len(self.proc_results.patient_id.unique())
         async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0) | (self.proc_results.static_dca != 0) | (self.proc_results.dyn_dca != 0))
@@ -272,6 +323,7 @@ class ResultsContainer(object):
         n_vc_async = len(self.proc_results[(self.proc_results.ventmode=='vc') & async_mask])
         n_pc_async = len(self.proc_results[(self.proc_results.ventmode=='pc') & async_mask])
         n_prvc_async = len(self.proc_results[(self.proc_results.ventmode=='prvc') & async_mask])
+        total_async = len(self.proc_results[async_mask])
         vals = [
             # general stats
             n_patients,
@@ -299,12 +351,25 @@ class ResultsContainer(object):
             round(n_vc_async / vc_pts, 2) if vc_pts != 0 else np.nan,
             round(n_pc_async / pc_pts, 2) if pc_pts != 0 else np.nan,
             n_prvc_async / prvc_pts if prvc_pts != 0 else np.nan,
+            # deeper dive into asynchronies
+            len(self.proc_results[self.proc_results.dta > 0]),
+            len(self.proc_results[self.proc_results.bsa > 0]),
+            len(self.proc_results[self.proc_results.fa > 0]),
+            len(self.proc_results[(self.proc_results.dyn_dca > 0) | (self.proc_results.static_dca > 0)]),
+            len(self.proc_results[(self.proc_results.static_dca > 0)]),
+            len(self.proc_results[(self.proc_results.dyn_dca > 0)]),
+            # proportions
+            round(len(self.proc_results[self.proc_results.dta > 0])/total_async, 2),
+            round(len(self.proc_results[self.proc_results.bsa > 0])/total_async, 2),
+            round(len(self.proc_results[self.proc_results.fa > 0])/total_async, 2),
+            round(len(self.proc_results[(self.proc_results.dyn_dca > 0) | (self.proc_results.static_dca > 0)])/total_async, 2),
         ]
         table = PrettyTable()
         table.field_names = ['stat', 'val']
         for stat, val in zip(data, vals):
             table.add_row([stat, val])
-        print(table)
+        display(HTML('<h2>{}</h2>'.format("Data Descriptive Statistics")))
+        display(HTML(table.get_html_string()))
 
     def get_masks(self):
         return {
@@ -433,15 +498,16 @@ class ResultsContainer(object):
         # XXX add WMD option
         diff_cols = ["{}_diff".format(algo) for algo in self.algos_used]
         sorted_diff_cols = sorted(diff_cols)
-        medians, conf = self.extract_confidence_intervals(df[sorted_diff_cols])
+        medians, iqr = self.extract_medians_and_iqr(df[sorted_diff_cols])
         stds = df[sorted_diff_cols].std().values.round(5)
 
         # alphabetical order again
         algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
-        self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians, conf, notch=True, bootstrap=self.boot_resamples)
+        self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians, notch=False, bootstrap=self.boot_resamples)
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
         plt.setp(xtick_names, rotation=60, fontsize=14)
-        # XXX redo labeling
+        xlim = ax.get_xlim()
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
         ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         # want to keep a constant y perspective to compare algos
@@ -450,36 +516,104 @@ class ResultsContainer(object):
         ax.set_title(title, fontsize=20)
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
         table = PrettyTable()
-        table.field_names = ['algo', 'median diff', '95% conf_lower', '95% conf_upper', 'std']
+        table.field_names = ['Algorithm', 'Median Diff', '25% IQR', '75% IQR', 'std']
         medians = medians.round(2)
-        conf = conf.round(2)
+        iqr = iqr.round(2)
+        stds = stds.round(2)
         for i, algo in enumerate(algos_in_order):
-            table.add_row([algo, medians[i], conf[i, 0], conf[i, 1], stds[i]])
+            if not np.isnan(medians[i]):
+                table.add_row([algo, medians[i], iqr[i, 0], iqr[i, 1], stds[i]])
+            else:
+                table.add_row([algo, '-', '-', '-', '-'])
+
+        # XXX perform boldface formatting with best median/iqr
+        #
+        # How to do? There's got to be a method that's been done before.
+        # Why don't you just do something for now to get the code down and
+        # then refine your method later.
+        soup = BeautifulSoup(table.get_html_string())
+        min_median = np.nanargmin(abs(medians))
+        min_iqr_rel_to_0 = np.nanargmin(abs(iqr).sum(axis=1))
+        min_std = np.nanargmin(stds)
+        # the +1 is because the header is embedded in a <tr> element
+        min_med_elem = soup.find_all('tr')[min_median+1]
+        min_iqr_elem = soup.find_all('tr')[min_iqr_rel_to_0+1]
+        min_std_elem = soup.find_all('tr')[min_std+1]
+
+        self._change_td_to_bold(soup, min_med_elem.find_all('td')[1])
+        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[2])
+        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[3])
+        self._change_td_to_bold(soup, min_std_elem.find_all('td')[4])
+
         display(HTML('<h2>{}</h2>'.format(title)))
-        display(HTML(table.get_html_string()))
+        display(HTML(soup.prettify()))
+        plt.show(fig)
+
+    def _change_td_to_bold(self, soup, td):
+        val = td.string
+        td.clear()
+        td.insert(0, soup.new_tag('b'))
+        td.b.string = val
 
     def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[]):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
+        # XXX need to check if this actually works.
         exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
             'breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_no_async, only_patient), exclude_cols),
+            'no_async_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_vc_only, only_patient), exclude_cols),
             'vc_only_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_pressure_only, only_patient), exclude_cols),
-            'pressure_only_breath_by_breath_results.png'
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_vc_no_async, only_patient), exclude_cols),
+            'vc_no_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_vc_only_async, only_patient), exclude_cols),
             'vc_only_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_pc_only, only_patient), exclude_cols),
+            'pc_only_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_pc_no_async, only_patient), exclude_cols),
+            'pc_no_async_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_pc_only_async, only_patient), exclude_cols),
+            'pc_only_async_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_prvc_only, only_patient), exclude_cols),
+            'prvc_only_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_prvc_no_async, only_patient), exclude_cols),
+            'prvc_no_async_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_prvc_only_async, only_patient), exclude_cols),
+            'prvc_only_async_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_all_pressure_only, only_patient), exclude_cols),
+            'pc_prvc_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_all_pressure_no_async, only_patient), exclude_cols),
+            'pc_prvc_no_async_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_pressure_only_async, only_patient), exclude_cols),
-            'pressure_only_async_breath_by_breath_results.png'
+            'pc_prvc_only_async_breath_by_breath_results.png'
         )
 
     def plot_per_patient_results(self, use_wmd, individual_patients=False, show_boxplots=True, std_lim=None):
@@ -503,27 +637,54 @@ class ResultsContainer(object):
         if show_boxplots:
             self.plot_algo_mad_std_boxplots(self.pp_no_async, algos_in_order, use_wmd, 'patient_by_patient_no_async')
 
-        # VC only patient by patient.
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, use_wmd, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png', individual_patients, std_lim)
-        if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_vc_only, algos_in_order, use_wmd, 'vc_only_pbp')
-
-        # PC/PRVC only
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png', individual_patients, std_lim)
-
-        if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
-
         # Asynchronies only
         mad_std, algos_in_order = self.plot_algo_scatter(self.pp_async_results, use_wmd, 'Patient by patient results. Asynchronies only', 'patient_by_patient_asynchronies_only.png', individual_patients, std_lim)
         if show_boxplots:
             self.plot_algo_mad_std_boxplots(self.pp_async_results, algos_in_order, use_wmd, 'asynchronies_only_pbp')
 
+        # VC only patient by patient.
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only, use_wmd, 'Patient by patient results. VC only', 'patient_by_patient_vc_only.png', individual_patients, std_lim)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_vc_only, algos_in_order, use_wmd, 'vc_only_pbp')
+
+        # VC only, non-asynchronies
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_no_async, use_wmd, 'Patient by patient results. VC, No Asynchronies', 'patient_by_patient_vc_no_asynchronies.png', individual_patients, std_lim)
+
+        # VC only, asynchronies only
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, use_wmd, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png', individual_patients, std_lim)
+
+        # PC only patient by patient.
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pc_only, use_wmd, 'Patient by patient results. PC only', 'patient_by_patient_pc_only.png', individual_patients, std_lim)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_pc_only, algos_in_order, use_wmd, 'pc_only_pbp')
+
+        # PC only, non-asynchronies
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pc_no_async, use_wmd, 'Patient by patient results. PC, No Asynchronies', 'patient_by_patient_pc_no_asynchronies.png', individual_patients, std_lim)
+
+        # PC only, asynchronies only
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pc_only_async, use_wmd, 'Patient by patient results. PC Asynchronies only', 'patient_by_patient_pc_asynchronies_only.png', individual_patients, std_lim)
+
+        # PRVC only patient by patient.
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_prvc_only, use_wmd, 'Patient by patient results. PRVC only', 'patient_by_patient_prvc_only.png', individual_patients, std_lim)
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_prvc_only, algos_in_order, use_wmd, 'prvc_only_pbp')
+
+        # PRVC only, non-asynchronies
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_prvc_no_async, use_wmd, 'Patient by patient results. PRVC, No Asynchronies', 'patient_by_patient_prvc_no_asynchronies.png', individual_patients, std_lim)
+
+        # PRVC only, asynchronies only
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_prvc_only_async, use_wmd, 'Patient by patient results. PRVC Asynchronies only', 'patient_by_patient_prvc_asynchronies_only.png', individual_patients, std_lim)
+
+        # PC/PRVC only
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png', individual_patients, std_lim)
+
+        if show_boxplots:
+            self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
+
         # Artifacts only
         mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, use_wmd, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png', individual_patients, std_lim)
 
         # group asynchronies/artifacts by mode
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_vc_only_async, use_wmd, 'Patient by patient results. VC Asynchronies only', 'patient_by_patient_vc_asynchronies_only.png', individual_patients, std_lim)
         mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png', individual_patients, std_lim)
 
         # I go back and forth in between questioning whether this belongs here or in per_patient

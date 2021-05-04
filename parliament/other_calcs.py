@@ -160,9 +160,10 @@ def ft_inspiratory_least_squares(flow, vols, pressure, x0_index, peep, dt, tvi):
     Volume targeted least squares. Perform least squares approximation of R and E the way
     that Kannangara does it in his paper. Only use the inspiratory limb
 
-    Kannangara DO, Newberry F, Howe S, Major V, Redmond D, Szlavecs A, Chiew YS, Pretty C, Benyó B,
-    Shaw GM, Chase JG. Estimating the true respiratory mechanics during asynchronous pressure
-    controlled ventilation. Biomedical Signal Processing and Control. 2016 Sep 1;30:70-8.
+    Kannangara DO, Newberry F, Howe S, Major V, Redmond D, Szlavecs A,
+    Chiew YS, Pretty C, Benyó B, Shaw GM, Chase JG. Estimating the true
+    respiratory mechanics during asynchronous pressure controlled ventilation.
+    Biomedical Signal Processing and Control. 2016 Sep 1;30:70-8.
 
     V_dot = (pressure - peep) / R - E*V / R
 
