@@ -403,6 +403,13 @@ class ResultsContainer(object):
                 (self.proc_results.static_dca != 0) |
                 (self.proc_results.dyn_dca != 0)
             ),
+            'bsa': (self.proc_results.bsa != 0),
+            'dca': (
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            ),
+            'dta': (self.proc_results.dta != 0),
+            'fa': (self.proc_results.fa != 0),
             'vc_only': (self.proc_results.ventmode == 'vc'),
             'pc_only': (self.proc_results.ventmode == 'pc'),
             'prvc_only': (self.proc_results.ventmode == 'prvc'),
