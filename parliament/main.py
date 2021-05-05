@@ -115,7 +115,8 @@ class ResultsContainer(object):
         row_results = []
         for patient_id, frame in df.groupby('patient_id'):
             # find MAD per patient, per algo
-            for algo in self.algos_used:
+            algos_in_frame = set(df.columns).intersection(self.algos_used)
+            for algo in algos_in_frame:
                 row = [patient_id, algo]
                 row.append(median_absolute_deviation(frame['{}_diff'.format(algo)], nan_policy='omit'))
                 row.append(frame[algo].std())
@@ -141,7 +142,8 @@ class ResultsContainer(object):
             self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
         self.calc_wmd(self.proc_results)
 
-        async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0) | (self.proc_results.static_dca != 0) | (self.proc_results.dyn_dca != 0))
+        masks = self.get_masks()
+        async_mask = masks['async']
 
         # analyze all per patient breaths
         self.pp_all = self.analyze_per_patient_df(self.proc_results)
@@ -205,6 +207,26 @@ class ResultsContainer(object):
         # analyze asynchronous pressure related breathing. PC/PRVC
         self.bb_all_pressure_only_async = self.proc_results[(self.proc_results.ventmode.isin(['pc', 'prvc'])) & async_mask]
         self.pp_all_pressure_only_async = self.analyze_per_patient_df(self.bb_all_pressure_only_async)
+
+        # analyze breaths with no apparent efforting.
+        self.bb_no_efforting = self.proc_results[masks['no_efforting']]
+        self.pp_no_efforting = self.analyze_per_patient_df(self.bb_no_efforting)
+
+        # analyze breaths for early efforting
+        self.bb_early_efforting = self.proc_results[masks['early_efforting']]
+        self.pp_early_efforting = self.analyze_per_patient_df(self.bb_early_efforting)
+
+        # analyze breaths for inspiratory efforting
+        self.bb_insp_efforting = self.proc_results[masks['insp_efforting']]
+        self.pp_insp_efforting = self.analyze_per_patient_df(self.bb_insp_efforting)
+
+        # analyze breaths for late efforting
+        self.bb_exp_efforting = self.proc_results[masks['exp_efforting']]
+        self.pp_exp_efforting = self.analyze_per_patient_df(self.bb_exp_efforting)
+
+        # analyze breaths for all efforting
+        self.bb_all_efforting = self.proc_results[masks['all_efforting']]
+        self.pp_all_efforting = self.analyze_per_patient_df(self.bb_all_efforting)
 
         # save a processed results container because this method takes the
         # longest time out of all the other methods to run
@@ -316,7 +338,8 @@ class ResultsContainer(object):
             'proportion static/dynamic dca of async',
         ]
         n_patients = len(self.proc_results.patient_id.unique())
-        async_mask = ((self.proc_results.dta != 0) | (self.proc_results.bsa != 0) | (self.proc_results.fa != 0) | (self.proc_results.static_dca != 0) | (self.proc_results.dyn_dca != 0))
+        masks = self.get_masks()
+        async_mask = masks['async']
         vc_pts = len(self.proc_results[self.proc_results.ventmode=='vc'].patient_id.unique())
         pc_pts = len(self.proc_results[self.proc_results.ventmode=='pc'].patient_id.unique())
         prvc_pts = len(self.proc_results[self.proc_results.ventmode=='prvc'].patient_id.unique())
@@ -384,11 +407,25 @@ class ResultsContainer(object):
             'pc_only': (self.proc_results.ventmode == 'pc'),
             'prvc_only': (self.proc_results.ventmode == 'prvc'),
             'pc_prvc': self.proc_results.ventmode.isin(['pc', 'prvc']),
+            'no_efforting': (
+                (self.proc_results.early_efforting == 0) &
+                (self.proc_results.insp_efforting == 0) &
+                (self.proc_results.exp_efforting == 0)
+            ),
+            'early_efforting': (self.proc_results.early_efforting != 0),
+            'insp_efforting': (self.proc_results.insp_efforting != 0),
+            'exp_efforting': (self.proc_results.exp_efforting != 0),
+            'all_efforting': (
+                (self.proc_results.early_efforting != 0) |
+                (self.proc_results.insp_efforting != 0) |
+                (self.proc_results.exp_efforting != 0)
+            ),
         }
 
     def preprocess_mad_std_in_df(self, df, use_wmd):
         # Do scatter of MAD by std
-        mad_std = {algo: [[], [], None, None, None] for algo in self.algos_used}
+        algos_in_frame = sorted(list(df.algo.unique()))
+        mad_std = {algo: [[], [], None, None, None] for algo in algos_in_frame}
         algo_dists = []
         if not use_wmd:
             mad_col = 'mad_pt'
@@ -397,7 +434,7 @@ class ResultsContainer(object):
             mad_col = 'mad_wmd'
             std_col = 'std_wmd'
 
-        for algo in self.algos_used:
+        for algo in algos_in_frame:
             # mad on x axis, std on y
             mad_std[algo][0] = df[df.algo == algo][mad_col]
             if np.isnan(mad_std[algo][0]).all():
@@ -412,7 +449,7 @@ class ResultsContainer(object):
             mad_std[algo][4] = mean_mad+mean_std
             algo_dists.append(mean_mad+mean_std)
 
-        algos_used = [algo for algo in copy(self.algos_used) if algo in mad_std]
+        algos_used = [algo for algo in copy(algos_in_frame) if algo in mad_std]
         # sort by alphabetical order
         algos_in_order = sorted(algos_used)
         return mad_std, algos_in_order
@@ -423,10 +460,11 @@ class ResultsContainer(object):
 
         X-axis is MAD and Y-axis is std.
         """
+        algos_in_frame = sorted(list(df.algo.unique()))
         mad_std, algos_in_order = self.preprocess_mad_std_in_df(df, use_wmd)
         markers = cycle(['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$', '$\dag$', '$\ddag$', '$\P$'])
-        colors = [cc.cm.glasbey(i) for i in range(len(self.algos_used))]
-        algo_dict = {algo: {'m': next(markers), 'c': colors[i]} for i, algo in enumerate(self.algos_used)}
+        colors = [cc.cm.glasbey(i) for i in range(len(algos_in_frame))]
+        algo_dict = {algo: {'m': next(markers), 'c': colors[i]} for i, algo in enumerate(algos_in_frame)}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
         if individual_patients:
@@ -452,7 +490,7 @@ class ResultsContainer(object):
                 alpha=.9,
                 s=350,
                 edgecolors='black',
-                zorder=len(self.algos_used)+2-i,
+                zorder=len(algos_in_frame)+2-i,
                 linewidths=1,
             )
         x = [mad_std[a][2] for a in algos_in_order]
@@ -521,7 +559,8 @@ class ResultsContainer(object):
     def show_individual_breath_by_breath_frame_results(self, df, figname):
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
         # XXX add WMD option
-        diff_cols = ["{}_diff".format(algo) for algo in self.algos_used]
+        algos_in_frame = set(df.columns).intersection(self.algos_used)
+        diff_cols = ["{}_diff".format(algo) for algo in algos_in_frame]
         sorted_diff_cols = sorted(diff_cols)
         medians, iqr = self.extract_medians_and_iqr(df[sorted_diff_cols])
         stds = df[sorted_diff_cols].std().values.round(5)
@@ -627,6 +666,26 @@ class ResultsContainer(object):
             'prvc_only_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_no_efforting, only_patient), exclude_cols),
+            'no_efforting_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_early_efforting, only_patient), exclude_cols),
+            'early_efforting_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_insp_efforting, only_patient), exclude_cols),
+            'insp_efforting_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_exp_efforting, only_patient), exclude_cols),
+            'exp_efforting_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_all_efforting, only_patient), exclude_cols),
+            'all_efforting_breath_by_breath_results.png'
+        )
+        self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_all_pressure_only, only_patient), exclude_cols),
             'pc_prvc_breath_by_breath_results.png'
         )
@@ -635,7 +694,7 @@ class ResultsContainer(object):
             'pc_prvc_no_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_pressure_only_async, only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_all_pressure_only_async, only_patient), exclude_cols),
             'pc_prvc_only_async_breath_by_breath_results.png'
         )
 
@@ -698,17 +757,67 @@ class ResultsContainer(object):
         # PRVC only, asynchronies only
         mad_std, algos_in_order = self.plot_algo_scatter(self.pp_prvc_only_async, use_wmd, 'Patient by patient results. PRVC Asynchronies only', 'patient_by_patient_prvc_asynchronies_only.png', individual_patients, std_lim)
 
+        # no efforting only
+        mad_std, algos_in_order = self.plot_algo_scatter(
+            self.pp_no_efforting,
+            use_wmd,
+            'Patient by patient results. No Apparent Efforting',
+            'patient_by_patient_no_efforting.png',
+            individual_patients,
+            std_lim
+        )
+
+        # early efforting only
+        mad_std, algos_in_order = self.plot_algo_scatter(
+            self.pp_early_efforting,
+            use_wmd,
+            'Patient by patient results. Early Efforting',
+            'patient_by_patient_early_efforting.png',
+            individual_patients,
+            std_lim
+        )
+
+        # insp efforting only
+        mad_std, algos_in_order = self.plot_algo_scatter(
+            self.pp_insp_efforting,
+            use_wmd,
+            'Patient by patient results. Inspiratory Efforting',
+            'patient_by_patient_insp_efforting.png',
+            individual_patients,
+            std_lim
+        )
+
+        # exp efforting only
+        mad_std, algos_in_order = self.plot_algo_scatter(
+            self.pp_exp_efforting,
+            use_wmd,
+            'Patient by patient results. Expiratory Efforting',
+            'patient_by_patient_exp_efforting.png',
+            individual_patients,
+            std_lim
+        )
+
+        # all efforting only
+        mad_std, algos_in_order = self.plot_algo_scatter(
+            self.pp_all_efforting,
+            use_wmd,
+            'Patient by patient results. All Efforting',
+            'patient_by_patient_all_efforting.png',
+            individual_patients,
+            std_lim
+        )
+
         # PC/PRVC only
         mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all_pressure_only, use_wmd, 'Patient by patient results. PC/PRVC only', 'patient_by_patient_pc_prvc_only.png', individual_patients, std_lim)
 
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_all_pressure_only, algos_in_order, use_wmd, 'pressure_only_pbp')
 
         # Artifacts only
         mad_std, algos_in_order = self.plot_algo_scatter(self.pp_artifacts, use_wmd, 'Patient by patient results. Artifacts only', 'patient_by_patient_artifacts_only.png', individual_patients, std_lim)
 
         # group asynchronies/artifacts by mode
-        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png', individual_patients, std_lim)
+        mad_std, algos_in_order = self.plot_algo_scatter(self.pp_all_pressure_only_async, use_wmd, 'Patient by patient results. Pressure Mode Asynchronies only', 'patient_by_patient_pressure_mode_asynchronies_only.png', individual_patients, std_lim)
 
         # I go back and forth in between questioning whether this belongs here or in per_patient
         if show_boxplots:
@@ -730,16 +839,39 @@ class ResultsContainer(object):
         pd.to_pickle(self, str(self.results_dir.joinpath('ResultsContainer.pkl')))
 
     def visualize_patient(self, patient, algos, extra_mask=None):
-        columns = algos + ['gold_stnd_compliance']
+        if algos == 'all':
+            algos = self.algos_used
+        algo_cols = algos
+        diff_cols = ['{}_diff'.format(c) for c in algo_cols]
+        wmd_cols = ['{}_wmd'.format(c) for c in algo_cols]
+        final_cols = algo_cols + diff_cols + wmd_cols + ['gold_stnd_compliance', 'patient_id']
+
         if not isinstance(extra_mask, type(None)):
-            patient_df = self.proc_results[(self.proc_results.patient == patient) & extra_mask][columns]
+            patient_df = self.proc_results[(self.proc_results.patient == patient) & extra_mask][final_cols]
         else:
-            patient_df = self.proc_results[self.proc_results.patient == patient][columns]
-        patient_df.plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=14)
+            patient_df = self.proc_results[self.proc_results.patient == patient][final_cols]
+
+        patient_df[algo_cols].plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
+        plt.legend(fontsize=16)
         plt.title(patient, fontsize=20)
         plt.plot(patient_df.gold_stnd_compliance, label='gt')
         plt.show()
-        plt.close()
+
+        pp_custom = self.analyze_per_patient_df(patient_df)
+        mad_std, algos_in_order = self.plot_algo_scatter(
+            pp_custom,
+            False,
+            'Patient {}. Custom plot'.format(patient),
+            '{}_custom_plot.png'.format(patient),
+            False,
+            None,
+        )
+
+        # breath by breath results
+        self.show_individual_breath_by_breath_frame_results(
+            patient_df, 'pc_prvc_only_async_breath_by_breath_results.png'
+        )
+
 
 
 def main():

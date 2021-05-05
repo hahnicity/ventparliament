@@ -462,7 +462,6 @@ class FileCalculations(object):
         # the peep algo actually works pretty well. The problems occur when peep is
         # changed, and then the median takes a bit of time to catch up.
         if (peep-1 > pressure[delta_idx:]).any() or (peep+1 < pressure[delta_idx:]).any():
-
             return 1
         return 0
 
