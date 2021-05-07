@@ -38,6 +38,11 @@ class ResultsContainer(object):
         self.boot_resamples = 100
         self.wmd_n = wmd_n
         self.full_analysis_done = False
+        self.scatter_marker_symbols = [
+            'o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H',
+            '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
+            '$\dag$', '$\ddag$', '$\P$'
+        ]
 
     def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians, **kwargs):
         """
@@ -88,13 +93,105 @@ class ResultsContainer(object):
         iqr = np.median(np.nanpercentile(bsData, percentiles, axis=1), axis=1)
         return np.median(estimate), iqr
 
+    def _mad_std_scatter(self, mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim):
+        """
+        """
+        markers = cycle(self.scatter_marker_symbols)
+        colors = [cc.cm.glasbey(i) for i in range(len(algos_in_order))]
+        algo_dict = {algo: {'m': next(markers), 'c': colors[i]} for i, algo in enumerate(algos_in_order)}
+        fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
+
+        if individual_patients:
+            for i, algo in enumerate(algos_in_order):
+                ax.scatter(
+                    x=mad_std[algo][0],
+                    y=mad_std[algo][1],
+                    marker=algo_dict[algo]['m'],
+                    color=algo_dict[algo]['c'],
+                    label=algo,
+                    alpha=0.4,
+                    s=100,
+                    zorder=1
+                )
+
+        for i, algo in enumerate(algos_in_order):
+            ax.scatter(
+                x=mad_std[algo][2],
+                y=mad_std[algo][3],
+                marker=algo_dict[algo]['m'],
+                color=algo_dict[algo]['c'],
+                label=algo if not individual_patients else None,
+                alpha=.9,
+                s=350,
+                edgecolors='black',
+                zorder=len(algos_in_order)+2-i,
+                linewidths=1,
+            )
+        x = [mad_std[a][2] for a in algos_in_order]
+        y = [mad_std[a][3] for a in algos_in_order]
+        ax.tick_params(axis='x', labelsize=14)
+        ax.tick_params(axis='y', labelsize=14)
+        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
+        ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
+        if std_lim is not None and len(x) > 1:
+            ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
+            ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
+
+        # draw a black line across origin lines in dark black
+        preset_xlim = ax.get_xlim()
+        preset_ylim = ax.get_ylim()
+        ax.plot(preset_xlim, [0, 0], color='black', zorder=0, lw=2)
+        ax.plot([0, 0], preset_ylim, color='black', zorder=0, lw=2)
+        ax.set_xlim(preset_xlim)
+        ax.set_ylim(preset_ylim)
+
+        fig.legend(fontsize=16, loc='center right')
+        ax.grid()
+        ax.set_title(plt_title, fontsize=20)
+        figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd))
+        fig.savefig(figname, dpi=self.dpi)
+
+        # show table of boxplot results
+        table = PrettyTable()
+        table.field_names = ['Algorithm', 'Shorthand Name', 'MAD (Median Absolute Deviation)', 'Standard Deviation (std)']
+        medians = np.array([mad_std[algo][2] for algo in algos_in_order])
+        stds = np.array([mad_std[algo][3] for algo in algos_in_order])
+        medians = medians.round(2)
+        stds = stds.round(2)
+        for i, algo in enumerate(algos_in_order):
+            table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], stds[i]])
+
+        soup = BeautifulSoup(table.get_html_string())
+        min_median = np.nanargmin(medians)
+        min_std = np.nanargmin(stds)
+        # the +1 is because the header is embedded in a <tr> element
+        min_med_elem = soup.find_all('tr')[min_median+1]
+        min_std_elem = soup.find_all('tr')[min_std+1]
+
+        self._change_td_to_bold(soup, min_med_elem.find_all('td')[2])
+        self._change_td_to_bold(soup, min_std_elem.find_all('td')[3])
+
+        display(HTML('<h2>{}</h2>'.format(plt_title)))
+        display(HTML(soup.prettify()))
+        plt.show(fig)
+        return mad_std, algos_in_order
+
     @classmethod
     def load_from_experiment_name(cls, experiment_name):
         """
         Load results container but even easier using the container.pkl obj
         """
         results_dir = Path(__file__).parent.joinpath('results', experiment_name)
-        return pd.read_pickle(results_dir.joinpath('ResultsContainer.pkl'))
+        cls = pd.read_pickle(results_dir.joinpath('ResultsContainer.pkl'))
+        try:
+            cls.scatter_marker_symbols
+        except AttributeError:
+            cls.scatter_marker_symbols = [
+                'o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H',
+                '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
+                '$\dag$', '$\ddag$', '$\P$'
+            ]
+        return cls
 
     def add_results_df(self, patient, dataframe):
         """
@@ -284,6 +381,28 @@ class ResultsContainer(object):
                 # removing any results that may be within range of the actual ground truth
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 15*algo_mad)].index, algo] = np.nan
 
+    def compare_masks(self, mask1, mask2, use_wmd, plt_title='custom', figname='custom.png', individual_patients=False, std_lim=None):
+        """
+        Compare results of different masks to each other. Plot results out.
+
+        :param mask1: first mask. Mask can be retrieved and chosen using the self.get_masks() method
+        :param mask2: second mask. Mask can be retrieved and chosen using the self.get_masks() method
+        :param use_wmd: (bool) use windowed median deviation or no?
+        """
+        pp1 = self.analyze_per_patient_df(self.proc_results[mask1])
+        pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
+        algos_in_order = sorted(list(pp1.algo.unique()))
+
+        mad_std1, _ = self.preprocess_mad_std_in_df(pp1, use_wmd)
+        mad_std2, _ = self.preprocess_mad_std_in_df(pp2, use_wmd)
+
+        mad_std = copy(mad_std1)
+        for algo in algos_in_order:
+            for i in range(4):
+                mad_std[algo][i] = mad_std2[algo][i] - mad_std1[algo][i]
+
+        return self._mad_std_scatter(mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim)
+
     def extract_medians_and_iqr(self, df):
         medians = []
         iqrs = []
@@ -396,7 +515,22 @@ class ResultsContainer(object):
 
     def get_masks(self):
         return {
+            'all_efforting': (
+                (self.proc_results.early_efforting != 0) |
+                (self.proc_results.insp_efforting != 0) |
+                (self.proc_results.exp_efforting != 0)
+            ),
             'async': (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa != 0) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            ),
+            'async_and_efforting': (
+                (self.proc_results.early_efforting != 0) |
+                (self.proc_results.insp_efforting != 0) |
+                (self.proc_results.exp_efforting != 0) |
                 (self.proc_results.dta != 0) |
                 (self.proc_results.bsa != 0) |
                 (self.proc_results.fa != 0) |
@@ -409,24 +543,36 @@ class ResultsContainer(object):
                 (self.proc_results.dyn_dca != 0)
             ),
             'dta': (self.proc_results.dta != 0),
+            'early_efforting': (self.proc_results.early_efforting != 0),
+            'exp_efforting': (self.proc_results.exp_efforting != 0),
             'fa': (self.proc_results.fa != 0),
-            'vc_only': (self.proc_results.ventmode == 'vc'),
-            'pc_only': (self.proc_results.ventmode == 'pc'),
-            'prvc_only': (self.proc_results.ventmode == 'prvc'),
-            'pc_prvc': self.proc_results.ventmode.isin(['pc', 'prvc']),
+            'insp_efforting': (self.proc_results.insp_efforting != 0),
+            'no_async': (
+                (self.proc_results.dta == 0) &
+                (self.proc_results.bsa == 0) &
+                (self.proc_results.fa == 0) &
+                (self.proc_results.static_dca == 0) &
+                (self.proc_results.dyn_dca == 0)
+            ),
+            'no_async_no_efforting': (
+                (self.proc_results.dta == 0) &
+                (self.proc_results.bsa == 0) &
+                (self.proc_results.fa == 0) &
+                (self.proc_results.static_dca == 0) &
+                (self.proc_results.dyn_dca == 0) &
+                (self.proc_results.early_efforting == 0) &
+                (self.proc_results.insp_efforting == 0) &
+                (self.proc_results.exp_efforting == 0)
+            ),
             'no_efforting': (
                 (self.proc_results.early_efforting == 0) &
                 (self.proc_results.insp_efforting == 0) &
                 (self.proc_results.exp_efforting == 0)
             ),
-            'early_efforting': (self.proc_results.early_efforting != 0),
-            'insp_efforting': (self.proc_results.insp_efforting != 0),
-            'exp_efforting': (self.proc_results.exp_efforting != 0),
-            'all_efforting': (
-                (self.proc_results.early_efforting != 0) |
-                (self.proc_results.insp_efforting != 0) |
-                (self.proc_results.exp_efforting != 0)
-            ),
+            'pc_only': (self.proc_results.ventmode == 'pc'),
+            'pc_prvc': self.proc_results.ventmode.isin(['pc', 'prvc']),
+            'prvc_only': (self.proc_results.ventmode == 'prvc'),
+            'vc_only': (self.proc_results.ventmode == 'vc'),
         }
 
     def preprocess_mad_std_in_df(self, df, use_wmd):
@@ -469,76 +615,7 @@ class ResultsContainer(object):
         """
         algos_in_frame = sorted(list(df.algo.unique()))
         mad_std, algos_in_order = self.preprocess_mad_std_in_df(df, use_wmd)
-        markers = cycle(['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H', '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$', '$\dag$', '$\ddag$', '$\P$'])
-        colors = [cc.cm.glasbey(i) for i in range(len(algos_in_frame))]
-        algo_dict = {algo: {'m': next(markers), 'c': colors[i]} for i, algo in enumerate(algos_in_frame)}
-        fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
-
-        if individual_patients:
-            for i, algo in enumerate(algos_in_order):
-                ax.scatter(
-                    x=mad_std[algo][0],
-                    y=mad_std[algo][1],
-                    marker=algo_dict[algo]['m'],
-                    color=algo_dict[algo]['c'],
-                    label=algo,
-                    alpha=0.4,
-                    s=100,
-                    zorder=1
-                )
-
-        for i, algo in enumerate(algos_in_order):
-            ax.scatter(
-                x=mad_std[algo][2],
-                y=mad_std[algo][3],
-                marker=algo_dict[algo]['m'],
-                color=algo_dict[algo]['c'],
-                label=algo if not individual_patients else None,
-                alpha=.9,
-                s=350,
-                edgecolors='black',
-                zorder=len(algos_in_frame)+2-i,
-                linewidths=1,
-            )
-        x = [mad_std[a][2] for a in algos_in_order]
-        y = [mad_std[a][3] for a in algos_in_order]
-        ax.tick_params(axis='x', labelsize=14)
-        ax.tick_params(axis='y', labelsize=14)
-        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
-        ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
-        if std_lim is not None and len(x) > 1:
-            ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
-            ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
-        fig.legend(fontsize=16, loc='center right')
-        ax.grid()
-        ax.set_title(plt_title, fontsize=20)
-        figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd))
-        fig.savefig(figname, dpi=self.dpi)
-
-        # show table of boxplot results
-        table = PrettyTable()
-        table.field_names = ['Algorithm', 'Shorthand Name', 'MAD (Median Absolute Deviation)', 'Standard Deviation (std)']
-        medians = np.array([mad_std[algo][2] for algo in algos_in_order])
-        stds = np.array([mad_std[algo][3] for algo in algos_in_order])
-        medians = medians.round(2)
-        stds = stds.round(2)
-        for i, algo in enumerate(algos_in_order):
-            table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], stds[i]])
-
-        soup = BeautifulSoup(table.get_html_string())
-        min_median = np.nanargmin(medians)
-        min_std = np.nanargmin(stds)
-        # the +1 is because the header is embedded in a <tr> element
-        min_med_elem = soup.find_all('tr')[min_median+1]
-        min_std_elem = soup.find_all('tr')[min_std+1]
-
-        self._change_td_to_bold(soup, min_med_elem.find_all('td')[2])
-        self._change_td_to_bold(soup, min_std_elem.find_all('td')[3])
-
-        display(HTML('<h2>{}</h2>'.format(plt_title)))
-        display(HTML(soup.prettify()))
-        plt.show(fig)
-        return mad_std, algos_in_order
+        return self._mad_std_scatter(mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim)
 
     def plot_algo_mad_std_boxplots(self, df, algo_ordering, use_wmd, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*2))
