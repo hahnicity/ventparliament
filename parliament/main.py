@@ -44,10 +44,10 @@ class ResultsContainer(object):
             '$\dag$', '$\ddag$', '$\P$'
         ]
 
-    def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians, **kwargs):
+    def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians=None, **kwargs):
         """
-        Basically an exact replica of what happens in seaborn except for support of conf intervals
-        and usermedians
+        Basically an exact replica of what happens in seaborn except for support of
+        usermedians
         """
         plotter = _BoxPlotter(x=None, y=None, hue=None, data=data, order=None, hue_order=None,
                               orient=None, color=None, palette=None, saturation=.75, width=.8,
@@ -65,13 +65,21 @@ class ResultsContainer(object):
             # with a single level of grouping
             box_data = np.asarray(remove_na(group_data))
 
-            artist_dict = ax.boxplot(box_data,
-                                     vert=vert,
-                                     patch_artist=True,
-                                     positions=[i],
-                                     widths=plotter.width,
-                                     usermedians=[medians[i]],
-                                     **kwargs)
+            if medians is not None:
+                artist_dict = ax.boxplot(box_data,
+                                         vert=vert,
+                                         patch_artist=True,
+                                         positions=[i],
+                                         widths=plotter.width,
+                                         usermedians=[medians[i]],
+                                         **kwargs)
+            else:
+                artist_dict = ax.boxplot(box_data,
+                                         vert=vert,
+                                         patch_artist=True,
+                                         positions=[i],
+                                         widths=plotter.width,
+                                         **kwargs)
             color = plotter.colors[i]
             plotter.restyle_boxplot(artist_dict, color, props)
 
@@ -95,6 +103,7 @@ class ResultsContainer(object):
 
     def _mad_std_scatter(self, mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim):
         """
+        Perform scatter plot using with MAD and std information for each algorithm.
         """
         markers = cycle(self.scatter_marker_symbols)
         colors = [cc.cm.glasbey(i) for i in range(len(algos_in_order))]
@@ -176,6 +185,39 @@ class ResultsContainer(object):
         plt.show(fig)
         return mad_std, algos_in_order
 
+    def _show_breath_by_breath_algo_table(self, algos_in_order, medians, iqr, stds, title):
+        """
+        Show table of boxplot results for breath by breath analysis of algorithms.
+        """
+        table = PrettyTable()
+        table.field_names = ['Algorithm', 'Shorthand Name', 'Median Diff', '25% IQR', '75% IQR', 'std']
+        medians = medians.round(2)
+        iqr = iqr.round(2)
+        stds = stds.round(2)
+        for i, algo in enumerate(algos_in_order):
+            if not np.isnan(medians[i]):
+                table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], iqr[i, 0], iqr[i, 1], stds[i]])
+            else:
+                table.add_row([FileCalculations.algo_name_mapping[algo], algo, '-', '-', '-', '-'])
+
+        soup = BeautifulSoup(table.get_html_string())
+        min_median = np.nanargmin(abs(medians))
+        # XXX in the future we should revisit this before publication
+        min_iqr_rel_to_0 = np.nanargmin(abs(iqr).sum(axis=1))
+        min_std = np.nanargmin(stds)
+        # the +1 is because the header is embedded in a <tr> element
+        min_med_elem = soup.find_all('tr')[min_median+1]
+        min_iqr_elem = soup.find_all('tr')[min_iqr_rel_to_0+1]
+        min_std_elem = soup.find_all('tr')[min_std+1]
+
+        self._change_td_to_bold(soup, min_med_elem.find_all('td')[2])
+        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[3])
+        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[4])
+        self._change_td_to_bold(soup, min_std_elem.find_all('td')[5])
+
+        display(HTML('<h2>{}</h2>'.format(title)))
+        display(HTML(soup.prettify()))
+
     @classmethod
     def load_from_experiment_name(cls, experiment_name):
         """
@@ -183,6 +225,7 @@ class ResultsContainer(object):
         """
         results_dir = Path(__file__).parent.joinpath('results', experiment_name)
         cls = pd.read_pickle(results_dir.joinpath('ResultsContainer.pkl'))
+        # a bit dirty, but some older analyses dont have this attr
         try:
             cls.scatter_marker_symbols
         except AttributeError:
@@ -365,25 +408,11 @@ class ResultsContainer(object):
                 proc_results.loc[i, 'p_driving'] = proc_results.loc[i, 'p_plat'] - proc_results.loc[i, 'peep']
 
         self.proc_results = proc_results
-        # filter outliers by patient
-        for algo in algos_used:
-            for patient_id, df in self.proc_results.groupby('patient_id'):
-                inf_idxs = df[(df[algo] == np.inf) | (df[algo] == -np.inf)].index
-                df.loc[inf_idxs, algo] = np.nan
-                self.proc_results.loc[inf_idxs, algo] = np.nan
-                # I've found that mean can blow up in the presence of outliers. So instead use
-                # the median
-                algo_median = df[algo].median(skipna=True)
-                algo_mad = median_absolute_deviation(df[algo].values, nan_policy='omit')
-                # XXX will probably need to change this with wmd impl
-                # XXX
-                # multiply the algo mad by 15 because we want to be absolutely sure we arent
-                # removing any results that may be within range of the actual ground truth
-                self.proc_results.loc[df[df[algo].abs() >= (algo_median + 15*algo_mad)].index, algo] = np.nan
 
-    def compare_masks(self, mask1, mask2, use_wmd, plt_title='custom', figname='custom.png', individual_patients=False, std_lim=None):
+    def compare_patient_level_masks(self, mask1, mask2, use_wmd, plt_title='custom', figname='custom_patient_by_patient.png', individual_patients=False, std_lim=None):
         """
-        Compare results of different masks to each other. Plot results out.
+        Compare results of different masks to each other on patient by patient basis.
+        Plot results out with scatter plots as usual.
 
         :param mask1: first mask. Mask can be retrieved and chosen using the self.get_masks() method
         :param mask2: second mask. Mask can be retrieved and chosen using the self.get_masks() method
@@ -402,6 +431,59 @@ class ResultsContainer(object):
                 mad_std[algo][i] = mad_std2[algo][i] - mad_std1[algo][i]
 
         return self._mad_std_scatter(mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim)
+
+    def compare_breath_level_masks(self, mask1_name, mask2_name, figname='custom_breath_by_breath.png'):
+        """
+        Compare results of different masks to each other on breath by breath results.
+
+        :param mask1_name: mask name based on masks obtained from `get_masks`
+        :param mask2_name: mask name based on masks obtained from `get_masks`
+        :param figname: figure name to save
+        """
+        algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used)
+        diff_cols = ["{}_diff".format(algo) for algo in algos_in_frame]
+        sorted_diff_cols = sorted(diff_cols)
+
+        masks = self.get_masks()
+        mask1 = masks[mask1_name]
+        mask2 = masks[mask2_name]
+        orig_bb1 = self.proc_results[mask1]
+        orig_bb2 = self.proc_results[mask2]
+        bb1 = orig_bb1[sorted_diff_cols].melt()
+        bb2 = orig_bb2[sorted_diff_cols].melt()
+        bb1['Mask'] = mask1_name.replace('_', ' ')
+        bb2['Mask'] = mask2_name.replace('_', ' ')
+        df = pd.concat([bb1, bb2])
+        df = df.rename(columns={'variable': 'algo'})
+
+        fig, ax = plt.subplots(figsize=(3*8, 3*3))
+        # XXX add WMD option
+
+        # alphabetical order again
+        algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
+        #colors = [cc.cm.glasbey(i) for i in range(len(algos_in_order))]
+        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=self.boot_resamples, showfliers=False, palette='Set2')
+        xtick_names = plt.setp(ax, xticklabels=algos_in_order)
+        plt.setp(xtick_names, rotation=60, fontsize=14)
+        xlim = ax.get_xlim()
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
+        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
+        ax.set_xlabel('Algorithm', fontsize=16)
+        ax.legend(fontsize=16)
+        # want to keep a constant y perspective to compare algos
+        #ax.set_ylim(-0.025, 0.025)
+        title = figname.replace('.png', '').replace('_', ' ')
+        ax.set_title(title, fontsize=20)
+        fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
+
+        medians, iqr = self.extract_medians_and_iqr(orig_bb1[sorted_diff_cols])
+        stds = orig_bb1[sorted_diff_cols].std().values
+        self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, mask1_name)
+
+        medians, iqr = self.extract_medians_and_iqr(orig_bb2[sorted_diff_cols])
+        stds = orig_bb2[sorted_diff_cols].std().values
+        self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, mask2_name)
+        plt.show(fig)
 
     def extract_medians_and_iqr(self, df):
         medians = []
@@ -523,7 +605,8 @@ class ResultsContainer(object):
             'async': (
                 (self.proc_results.dta != 0) |
                 (self.proc_results.bsa != 0) |
-                (self.proc_results.fa != 0) |
+                # FA mild can look very close to normal breathing
+                (self.proc_results.fa > 1) |
                 (self.proc_results.static_dca != 0) |
                 (self.proc_results.dyn_dca != 0)
             ),
@@ -533,7 +616,8 @@ class ResultsContainer(object):
                 (self.proc_results.exp_efforting != 0) |
                 (self.proc_results.dta != 0) |
                 (self.proc_results.bsa != 0) |
-                (self.proc_results.fa != 0) |
+                # FA mild can look very close to normal breathing
+                (self.proc_results.fa > 1) |
                 (self.proc_results.static_dca != 0) |
                 (self.proc_results.dyn_dca != 0)
             ),
@@ -546,13 +630,16 @@ class ResultsContainer(object):
             'early_efforting': (self.proc_results.early_efforting != 0),
             'exp_efforting': (self.proc_results.exp_efforting != 0),
             'fa': (self.proc_results.fa != 0),
+            'fa_mod_sev': (self.proc_results.fa > 1),
+            'fa_sev': (self.proc_results.fa > 2),
             'insp_efforting': (self.proc_results.insp_efforting != 0),
             'no_async': (
                 (self.proc_results.dta == 0) &
                 (self.proc_results.bsa == 0) &
                 (self.proc_results.fa == 0) &
                 (self.proc_results.static_dca == 0) &
-                (self.proc_results.dyn_dca == 0)
+                (self.proc_results.dyn_dca == 0) &
+                (self.proc_results.artifact == 0)
             ),
             'no_async_no_efforting': (
                 (self.proc_results.dta == 0) &
@@ -562,7 +649,8 @@ class ResultsContainer(object):
                 (self.proc_results.dyn_dca == 0) &
                 (self.proc_results.early_efforting == 0) &
                 (self.proc_results.insp_efforting == 0) &
-                (self.proc_results.exp_efforting == 0)
+                (self.proc_results.exp_efforting == 0) &
+                (self.proc_results.artifact == 0)
             ),
             'no_efforting': (
                 (self.proc_results.early_efforting == 0) &
@@ -618,7 +706,7 @@ class ResultsContainer(object):
         return self._mad_std_scatter(mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim)
 
     def plot_algo_mad_std_boxplots(self, df, algo_ordering, use_wmd, figname_prefix):
-        fig, ax = plt.subplots(figsize=(3*8, 3*2))
+        fig, ax = plt.subplots(figsize=(3*8, 3*3))
         # you can use bootstrap too if you want, but for now I'm not going to
         if not use_wmd:
             mad_col = 'mad_pt'
@@ -633,7 +721,7 @@ class ResultsContainer(object):
         ax.set_ylim(-.4, 26)
         fig.savefig(self.results_dir.joinpath('{}_mad_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
 
-        fig, ax = plt.subplots(figsize=(3*8, 3*2))
+        fig, ax = plt.subplots(figsize=(3*8, 3*3))
         sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True, showfliers=False)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
@@ -641,7 +729,7 @@ class ResultsContainer(object):
         fig.savefig(self.results_dir.joinpath('{}_std_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
 
     def show_individual_breath_by_breath_frame_results(self, df, figname):
-        fig, ax = plt.subplots(figsize=(3*8, 3*2))
+        fig, ax = plt.subplots(figsize=(3*8, 3*3))
         # XXX add WMD option
         algos_in_frame = set(df.columns).intersection(self.algos_used)
         diff_cols = ["{}_diff".format(algo) for algo in algos_in_frame]
@@ -665,34 +753,7 @@ class ResultsContainer(object):
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
         # show table of boxplot results
-        table = PrettyTable()
-        table.field_names = ['Algorithm', 'Shorthand Name', 'Median Diff', '25% IQR', '75% IQR', 'std']
-        medians = medians.round(2)
-        iqr = iqr.round(2)
-        stds = stds.round(2)
-        for i, algo in enumerate(algos_in_order):
-            if not np.isnan(medians[i]):
-                table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], iqr[i, 0], iqr[i, 1], stds[i]])
-            else:
-                table.add_row([FileCalculations.algo_name_mapping[algo], algo, '-', '-', '-', '-'])
-
-        soup = BeautifulSoup(table.get_html_string())
-        min_median = np.nanargmin(abs(medians))
-        # XXX in the future we should revisit this before publication
-        min_iqr_rel_to_0 = np.nanargmin(abs(iqr).sum(axis=1))
-        min_std = np.nanargmin(stds)
-        # the +1 is because the header is embedded in a <tr> element
-        min_med_elem = soup.find_all('tr')[min_median+1]
-        min_iqr_elem = soup.find_all('tr')[min_iqr_rel_to_0+1]
-        min_std_elem = soup.find_all('tr')[min_std+1]
-
-        self._change_td_to_bold(soup, min_med_elem.find_all('td')[2])
-        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[3])
-        self._change_td_to_bold(soup, min_iqr_elem.find_all('td')[4])
-        self._change_td_to_bold(soup, min_std_elem.find_all('td')[5])
-
-        display(HTML('<h2>{}</h2>'.format(title)))
-        display(HTML(soup.prettify()))
+        self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, title)
         plt.show(fig)
 
     def _change_td_to_bold(self, soup, td):
