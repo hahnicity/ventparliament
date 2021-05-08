@@ -69,19 +69,17 @@ def al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol):
         return np.nan
     start_idx = int(.1 / dt)
     end_idx = int(.5 / dt)
-    # its not totally clear what al-rawas meant in his paper that we must measure exhaled volume
-    # between 0.1 and 0.5 seconds. did this mean start doing point by point volume calcs from
-    # 0.1 or from start of exhale. For my purposes I start from beginning of exhale
-    #
     # method deviates slightly from al-rawas in that the volumes we have are negative. This is
     # necessary to maintain a positive slope while we just focus exclusively on tidal volume
     # exhaled, and not the tidal volume exhaled plus any residual tvi.
-    vols = calc_volumes(flow[x0_index:x0_index+end_idx], dt)
+    vols = np.abs(calc_volumes(flow[x0_index:x0_index+end_idx], dt))
     x = np.abs(flow[x0_index+start_idx:x0_index+end_idx])
     regress = linregress(x, vols[start_idx:])
-    if regress.rvalue < linregress_tol:
+    # XXX I'm still unsure about some questions I had between the al-rawas paper
+    # and my own implementation. especially for the first linregress check
+    if np.abs(regress.rvalue) < linregress_tol:
         return np.nan
-    return regress.slope
+    return linregress(np.arange(len(x)), vols[start_idx:]/x).slope
 
 
 def al_rawas_calcs(flow, vols, pressure, x0_index, dt, pip, peep, tvi, compliance_idx, linregress_tol=.98, tau=None):
