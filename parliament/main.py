@@ -703,7 +703,6 @@ class ResultsContainer(object):
 
     def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[]):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
-        # XXX need to check if this actually works.
         exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
