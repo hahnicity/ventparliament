@@ -432,15 +432,19 @@ class ResultsContainer(object):
                 # will do no real good to inform the actual implementation science.
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
 
-    def compare_patient_level_masks(self, mask1, mask2, use_wmd, plt_title='custom', figname='custom_patient_by_patient.png', individual_patients=False, std_lim=None):
+    def compare_patient_level_masks(self, mask1_name, mask2_name, use_wmd, individual_patients=False, std_lim=None):
         """
         Compare results of different masks to each other on patient by patient basis.
         Plot results out with scatter plots as usual.
 
-        :param mask1: first mask. Mask can be retrieved and chosen using the self.get_masks() method
-        :param mask2: second mask. Mask can be retrieved and chosen using the self.get_masks() method
+        :param mask1_name: mask name based on masks obtained from `get_masks`
+        :param mask2_name: mask name based on masks obtained from `get_masks`
         :param use_wmd: (bool) use windowed median deviation or no?
         """
+        masks = self.get_masks()
+        mask1 = masks[mask1_name]
+        mask2 = masks[mask2_name]
+
         pp1 = self.analyze_per_patient_df(self.proc_results[mask1])
         pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
         algos_in_order = sorted(list(pp1.algo.unique()))
@@ -453,6 +457,8 @@ class ResultsContainer(object):
             for i in range(4):
                 mad_std[algo][i] = mad_std2[algo][i] - mad_std1[algo][i]
 
+        plt_title = '{} vs {}'.format(mask1_name, mask2_name)
+        figname = '{}_vs_{}.png'.format(mask1_name, mask2_name)
         return self._mad_std_scatter(mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim)
 
     def compare_breath_level_masks(self, mask1_name, mask2_name, figname='custom_breath_by_breath.png'):
@@ -628,12 +634,30 @@ class ResultsContainer(object):
             'async': (
                 (self.proc_results.dta != 0) |
                 (self.proc_results.bsa != 0) |
-                # FA mild can look very close to normal breathing
+                (self.proc_results.fa != 0) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            ),
+            # FA mild can look very close to normal breathing
+            'async_no_fam': (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
                 (self.proc_results.fa > 1) |
                 (self.proc_results.static_dca != 0) |
                 (self.proc_results.dyn_dca != 0)
             ),
             'async_and_efforting': (
+                (self.proc_results.early_efforting != 0) |
+                (self.proc_results.insp_efforting != 0) |
+                (self.proc_results.exp_efforting != 0) |
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa != 0) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            ),
+            # FA mild can look very close to normal breathing
+            'async_no_fam_and_efforting': (
                 (self.proc_results.early_efforting != 0) |
                 (self.proc_results.insp_efforting != 0) |
                 (self.proc_results.exp_efforting != 0) |
