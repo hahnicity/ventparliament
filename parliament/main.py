@@ -408,6 +408,29 @@ class ResultsContainer(object):
                 proc_results.loc[i, 'p_driving'] = proc_results.loc[i, 'p_plat'] - proc_results.loc[i, 'peep']
 
         self.proc_results = proc_results
+        # filter outliers by patient
+        for algo in algos_used:
+            for patient_id, df in self.proc_results.groupby('patient_id'):
+                inf_idxs = df[(df[algo] == np.inf) | (df[algo] == -np.inf)].index
+                df.loc[inf_idxs, algo] = np.nan
+                self.proc_results.loc[inf_idxs, algo] = np.nan
+                # I've found that mean can blow up in the presence of outliers. So instead use
+                # the median
+                algo_median = df[algo].median(skipna=True)
+                algo_mad = median_absolute_deviation(df[algo].values, nan_policy='omit')
+                # multiply the algo mad by 30 because std can be so ridiculous that it
+                # is literally non-physiological 30x removal will basically remove
+                # everything within the range that is non-physiologic. If we do not
+                # do this filtering then std deviation explodes and makes it difficult
+                # to interpret our results.
+                #
+                # There is an argument to be made that this is important to keep
+                # because it will show true algorithm behavior. However, my
+                # disagreement of this is that when results become non-physiologic,
+                # meaning compliance that is impossible, then those results should just
+                # automatically be removed in practice. Then keeping them in science
+                # will do no real good to inform the actual implementation science.
+                self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
 
     def compare_patient_level_masks(self, mask1, mask2, use_wmd, plt_title='custom', figname='custom_patient_by_patient.png', individual_patients=False, std_lim=None):
         """
