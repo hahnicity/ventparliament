@@ -426,6 +426,7 @@ class FileCalculations(object):
             diffs = abs(np.diff(np.array(list(combinations(self.tvis, 2)))))
             if (diffs > np.array(self.tvis)*.1).any():
                 return 1
+            return 0
         else:
             return 0
 

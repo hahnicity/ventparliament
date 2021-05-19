@@ -101,6 +101,15 @@ class ResultsContainer(object):
         iqr = np.median(np.nanpercentile(bsData, percentiles, axis=1), axis=1)
         return np.median(estimate), iqr
 
+    def _change_td_to_bold(self, soup, td):
+        """
+        Change td tag so that interior text is boldfaced.
+        """
+        val = td.string
+        td.clear()
+        td.insert(0, soup.new_tag('b'))
+        td.b.string = val
+
     def _mad_std_scatter(self, mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim):
         """
         Perform scatter plot using with MAD and std information for each algorithm.
@@ -155,7 +164,6 @@ class ResultsContainer(object):
         ax.set_ylim(preset_ylim)
 
         fig.legend(fontsize=16, loc='center right')
-        ax.grid()
         ax.set_title(plt_title, fontsize=20)
         figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd))
         fig.savefig(figname, dpi=self.dpi)
@@ -281,6 +289,7 @@ class ResultsContainer(object):
         for algo in self.algos_used:
             self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
         self.calc_wmd(self.proc_results)
+        self.calc_async_index(self.proc_results)
 
         masks = self.get_masks()
         async_mask = masks['async']
@@ -374,6 +383,12 @@ class ResultsContainer(object):
         pd.to_pickle(self, self.results_dir.joinpath('ResultsContainer.pkl'))
 
     def calc_wmd(self, df):
+        """
+        Calculates the windowed median deviation (WMD) of an algorithm for
+        a set window size.
+
+        Note: WM = window median
+        """
         for patiend_id, pt_df in df.groupby('patient_id'):
             for algo in self.algos_used:
                 df.loc[pt_df.index, '{}_wm'.format(algo)] = pt_df[algo].rolling(self.wmd_n, min_periods=1).apply(lambda x: np.nanmedian(x))
@@ -388,6 +403,59 @@ class ResultsContainer(object):
                 df.loc[df.ventmode == 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
             elif algo in FileCalculations.algos_unavailable_for_pc_prvc:
                 df.loc[df.ventmode != 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
+
+    def calc_async_index(self, df):
+        """
+        Perform asynchrony index calculations on a dataset. The following calcs
+        will be done
+
+        * asynci
+        * asynci_no_fam
+        * bsi
+        * dti
+        * dci
+        * fai
+        * fai_no_fam
+        * insp_effi
+
+        We do index instead of frequency because you'll be able to compare
+        across window size changes that way.
+        """
+        # make sure that dta is properly formatted
+        df.loc[df.dta == 2, 'dta'] = 1
+        # small posthoc fix for insp efforting
+        df.loc[df.insp_efforting.isna(), 'insp_efforting'] = 0
+        # make changes so we can handle flow async different cases
+        df['fa_mild'] = 0
+        df['fa_mod'] = 0
+        df['fa_sev'] = 0
+        df.loc[df.fa == 1, 'fa_mild'] = 1
+        df.loc[df.fa == 2, 'fa_mod'] = 1
+        df.loc[df.fa == 3, 'fa_sev'] = 1
+
+        index_to_async_mapping = [
+            ('asynci', ['bsa', 'dta', 'fa_mild', 'fa_mod', 'fa_sev', 'static_dca', 'dyn_dca']),
+            ('asynci_no_fam', ['bsa', 'dta', 'fa_mod', 'fa_sev', 'static_dca', 'dyn_dca']),
+            ('bsi', ['bsa']),
+            ('dci', ['static_dca', 'dyn_dca']),
+            ('dti', ['dta']),
+            ('fai', ['fa_mild', 'fa_mod', 'fa_sev']),
+            ('fai_no_fam', ['fa_mod', 'fa_sev']),
+            ('insp_effi', ['insp_efforting']),
+        ]
+        for patiend_id, pt_df in df.groupby('patient_id'):
+            for index_col, async_cols in index_to_async_mapping:
+                # this works out decently for multi-col because the first sum
+                # operation compresses the columns. The downside is that because
+                # we didnt integrate DCA/FA into TOR we can have multiple asyncs
+                # in one breath. For now I dont know if this is a huge deal but
+                # it def. introduces some inaccuracy in the index vals because
+                # they may be artificially higher than what they would be normally
+                #
+                # set min_periods to 4 because that can artificially inflate index
+                # to 1 in early bn for patient
+                df.loc[pt_df.index, index_col] = pt_df[async_cols].sum(axis=1).\
+                    rolling(self.wmd_n, min_periods=4).apply(lambda x: np.nanmean(x))
 
     def collate_data(self, algos_used):
         """
@@ -527,33 +595,41 @@ class ResultsContainer(object):
         """
         Gather descriptive statistics for dataset using the processed results dataframe
         """
+        # find if data is cvc or not
+        is_cvc = False
+        for patient in self.proc_results.patient.unique():
+            if 'cvc' in patient:
+                is_cvc = True
+                break
+        pt_or_exp = 'patient' if not is_cvc else 'experiment'
+
         data = [
             # general patient stats
-            'n patients',
+            'n {}s'.format(pt_or_exp),
             '% Female',
             'Age (IQR)',
             'median RASS (IQR)',
             '% paralyzed',
             # ventmode n
-            'n vc patients',
-            'n pc patients',
-            'n prvc patients',
+            'n vc {}s'.format(pt_or_exp),
+            'n pc {}s'.format(pt_or_exp),
+            'n prvc {}s'.format(pt_or_exp),
             # general breath counts
             'total breaths',
-            'total vc breaths',
-            'total pc breaths',
+            'total vc breaths'.format(pt_or_exp),
+            'total pc breaths'.format(pt_or_exp),
             'total prvc breaths',
-            'mean breaths per patient',
-            'mean vc per patient',
-            'mean pc per patient',
-            'mean prvc per patient',
+            'mean breaths per {}'.format(pt_or_exp),
+            'mean vc per {}'.format(pt_or_exp),
+            'mean pc per {}'.format(pt_or_exp),
+            'mean prvc per {}'.format(pt_or_exp),
             # asynchronous breath counts
             'total vc async breaths',
             'total pc async breaths',
             'total prvc async breaths',
-            'mean vc async per patient',
-            'mean pc async per patient',
-            'mean prvc async per patient',
+            'mean vc async per {}'.format(pt_or_exp),
+            'mean pc async per {}'.format(pt_or_exp),
+            'mean prvc async per {}'.format(pt_or_exp),
             # deeper dive into asynchronies
             'total dta breaths',
             'total bsa breaths',
@@ -621,7 +697,8 @@ class ResultsContainer(object):
         table.field_names = ['stat', 'val']
         for stat, val in zip(data, vals):
             table.add_row([stat, val])
-        display(HTML('<h2>{}</h2>'.format("Data Descriptive Statistics")))
+        prefix = 'CVC' if is_cvc else 'Patient'
+        display(HTML('<h2>{}</h2>'.format(prefix + " Data Descriptive Statistics")))
         display(HTML(table.get_html_string()))
 
     def get_masks(self):
@@ -803,11 +880,99 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, title)
         plt.show(fig)
 
-    def _change_td_to_bold(self, soup, td):
-        val = td.string
-        td.clear()
-        td.insert(0, soup.new_tag('b'))
-        td.b.string = val
+    def perform_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100]):
+        """
+        Show insights from analyzing multiple different window sizes for different
+        algorithms.
+
+        :param absolute: return absolute values for WMD calcs
+        :param windows: list of window sizes to use
+        """
+        lw = 4
+        abs_lmda = lambda x: np.abs(x) if absolute else x
+        # for now just run some of the least squares algos
+        window_data = []
+        for win_size in windows:
+            self.set_new_wmd_n(win_size)
+            window_data.append(self.proc_results.copy())
+
+        for algo in self.algos_used:
+            fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(3*8, 3*6))
+            wmd_colname = algo + '_wmd'
+            for i, j, col in [(0, 0, 'asynci'), (0, 1, 'asynci_no_fam'), (1, 0, 'insp_effi'), (1, 1, 'bsi')]:
+                for k, size in enumerate(windows):
+                    data = window_data[k]
+                    data[wmd_colname] = abs_lmda(data[wmd_colname])
+                    sns.regplot(
+                        x=col,
+                        y=wmd_colname,
+                        data=data,
+                        scatter_kws={'s': 0, 'alpha': .0},
+                        line_kws={'label': size, 'lw': lw},
+                        ax=axes[i][j],
+                    )
+                axes[i][j].set_ylabel('')
+                axes[i][j].set_xlabel(col.replace('_', ' '))
+                x, y = axes[i][j].lines[0].get_data()
+                #slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
+                #handles, labels = axes[i][j].get_legend_handles_labels()
+                #axes[i][j].legend(handles, ['n: {} slope: {}'.format(self.wmd_n, slope)], fontsize=16)
+                axes[i][j].legend()
+                xlim = axes[i][j].get_xlim()
+                axes[i][j].plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=lw)
+                axes[i][j].set_xlim(xlim)
+                y_min = sys.maxsize
+                y_max = -sys.maxsize
+                for line in axes[i][j].lines:
+                    x, y = line.get_data()
+                    if min(y) < y_min:
+                        y_min = min(y)
+                    if max(y) > y_max:
+                        y_max = max(y)
+                min_ = y_min-5 if not absolute else -1
+                axes[i][j].set_ylim((min_, y_max+5))
+
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=24)
+            plt.show(fig)
+
+    def perform_single_window_analysis(self, absolute=True):
+        """
+        Show insights form analyzing windowed calculations
+
+        Lineplots: For each algorithm display regression lineplot showing the
+                   window's performance across varying scenarios.
+
+        :param absolute: return absolute values for WMD calcs
+        """
+        lw = 4
+        abs_lmda = lambda x: np.abs(x) if absolute else x
+        # for now just run some of the least squares algos
+        for algo in self.algos_used:
+            fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(3*8, 3*6))
+            wmd_colname = algo + '_wmd'
+            for i, j, col in [(0, 0, 'asynci'), (0, 1, 'asynci_no_fam'), (1, 0, 'insp_effi'), (1, 1, 'bsi')]:
+                data = self.proc_results.copy()
+                data[wmd_colname] = abs_lmda(data[wmd_colname])
+                sns.regplot(
+                    x=col,
+                    y=wmd_colname,
+                    data=data,
+                    scatter_kws={'s': 2, 'alpha': .5, 'edgecolors': 'black', 'color': 'blue'},
+                    line_kws={'label': 'regression', 'lw': lw},
+                    ax=axes[i][j],
+                )
+                axes[i][j].set_ylabel('')
+                axes[i][j].set_xlabel(col.replace('_', ' '))
+                x, y = axes[i][j].lines[0].get_data()
+                slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
+                handles, labels = axes[i][j].get_legend_handles_labels()
+                axes[i][j].legend(handles, ['n: {} slope: {}'.format(self.wmd_n, slope)], fontsize=16)
+                xlim = axes[i][j].get_xlim()
+                axes[i][j].plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=lw)
+                axes[i][j].set_xlim(xlim)
+
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=24)
+            plt.show(fig)
 
     def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[]):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
@@ -1029,6 +1194,15 @@ class ResultsContainer(object):
             self.results_dir.mkdir()
         pd.to_pickle(self, str(self.results_dir.joinpath('ResultsContainer.pkl')))
 
+    def set_new_wmd_n(self, wmd_n):
+        """
+        Set a new number of samples for WMD.
+
+        :param wmd_n: new length of WMD window
+        """
+        self.wmd_n = wmd_n
+        self.analyze_results()
+
     def visualize_patient(self, patient, algos, extra_mask=None, ts_xlim=None, ts_ylim=None):
         if algos == 'all':
             algos = self.algos_used
@@ -1066,7 +1240,6 @@ class ResultsContainer(object):
         self.show_individual_breath_by_breath_frame_results(
             patient_df, 'pc_prvc_only_async_breath_by_breath_results.png'
         )
-
 
 
 def main():
