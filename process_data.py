@@ -55,10 +55,7 @@ class Processing(object):
             for mode in cvc_modes:
                 mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
 
-        try:
-            return np.append(extra_br_metadata, np.expand_dims(mode_df['ventmode'].values, axis=1), axis=1)
-        except:
-            import IPython; IPython.embed()
+        return np.append(extra_br_metadata, np.expand_dims(mode_df['ventmode'].values, axis=1), axis=1)
 
     def check_is_qi_cohort_plat(self, rows, plat_time):
         for i, row in rows.iterrows():
@@ -206,7 +203,8 @@ class Processing(object):
         """
         Make GK clustering obj using Babuska's fuzzy clustering algo for the exp. curve only
 
-        Not actually too sure what I was doing here. Looks like something experimental
+        Oh. I think I was performing preprocessing for fuzzy clustering so that I didn't have
+        to run it on-the-fly in the actual analytics code.
         """
         z = []
         for patient_dir in self.processed_data_dir.glob('*RPI*'):

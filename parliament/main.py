@@ -1029,7 +1029,7 @@ class ResultsContainer(object):
             self.results_dir.mkdir()
         pd.to_pickle(self, str(self.results_dir.joinpath('ResultsContainer.pkl')))
 
-    def visualize_patient(self, patient, algos, extra_mask=None):
+    def visualize_patient(self, patient, algos, extra_mask=None, ts_xlim=None, ts_ylim=None):
         if algos == 'all':
             algos = self.algos_used
         algo_cols = algos
@@ -1045,6 +1045,10 @@ class ResultsContainer(object):
         patient_df[algo_cols].plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
         plt.legend(fontsize=16)
         plt.title(patient, fontsize=20)
+        if ts_xlim is not None:
+            plt.xlim(ts_xlim)
+        if ts_ylim is not None:
+            plt.ylim(ts_ylim)
         plt.plot(patient_df.gold_stnd_compliance, label='gt')
         plt.show()
 
