@@ -454,7 +454,7 @@ class ResultsContainer(object):
                 #
                 # set min_periods to 4 because that can artificially inflate index
                 # to 1 in early bn for patient
-                df.loc[pt_df.index, index_col] = pt_df[async_cols].sum(axis=1).\
+                df.loc[pt_df.index, index_col] = pt_df[async_cols].any(axis=1).astype(int).\
                     rolling(self.wmd_n, min_periods=4).apply(lambda x: np.nanmean(x))
 
     def collate_data(self, algos_used):
