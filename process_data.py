@@ -15,6 +15,7 @@ from pathlib import Path
 from algorithms.dca import extract_new_feature
 from algorithms.flow_asynchrony import get_gen_flow_async
 from algorithms.tor5 import detectPVI
+from dtwco.warping.core import dtw
 from fuzzy_clust_algos.gk import GK
 import numpy as np
 import pandas as pd
@@ -26,7 +27,7 @@ from parliament.other_calcs import calc_volumes
 
 
 class Processing(object):
-    def __init__(self, cohort_filepath, raw_data_dir, processed_data_dir, min_plat_time, flow_bound, any_or_all):
+    def __init__(self, cohort_filepath, raw_data_dir, processed_data_dir, min_plat_time, flow_bound, any_or_all, dtw_n_breaths):
         self.raw_data_dir = Path(raw_data_dir)
         self.processed_data_dir = Path(processed_data_dir)
         self.cohort = pd.read_csv(cohort_filepath)
@@ -35,6 +36,7 @@ class Processing(object):
         self.min_plat_time = min_plat_time
         self.flow_bound = flow_bound
         self.any_or_all = any_or_all
+        self.n_breaths = dtw_n_breaths
 
     def add_ventmode_metadata(self, extra_br_metadata, ventmode_file, raw_file, is_cvc):
         if not ventmode_file.exists():
@@ -177,6 +179,7 @@ class Processing(object):
             extra_results_frame['artifact'] = pva['cosumtvd']
             extra_results_frame = extra_results_frame.merge(flow_asyncs, on='rel_bn', how='left')
             extra_results_frame.rename(columns={'severity': 'fa', 'location': 'fa_loc'}, inplace=True)
+            extra_results_frame['dtw'] = self.perform_dtw_on_breaths(breaths)
             no_vc_mask = extra_results_frame.fa.isna()
             extra_results_frame.loc[no_vc_mask, 'fa'] = 0
             extra_results_frame.loc[no_vc_mask, 'fa_loc'] = 'NA'
@@ -236,6 +239,44 @@ class Processing(object):
         gk_pathname = objs_dir.joinpath('gk.pkl').resolve()
         pd.to_pickle(gk, gk_pathname, compression=None)
 
+    def perform_dtw_on_breaths(self, pt_data):
+        """
+        Analyze patient breaths using DTW lookback technique.
+
+        :param pt_data: List of breaths for the particular patient we want to analyze
+        """
+        flow_waves = []
+        pressure_waves = []
+        dtw_scores = []
+
+        for breath in pt_data:
+            flow, pressure = breath['flow'], breath['pressure']
+
+            if len(flow) == 0 or len(pressure) == 0:
+                dtw_scores.append(np.nan)
+                continue
+
+            if len(flow_waves) < self.n_breaths:
+                flow_waves.append(flow)
+                pressure_waves.append(pressure)
+                dtw_scores.append(np.nan)
+                continue
+
+            score = 0
+            for prev in flow_waves:
+                score += dtw(prev, flow)
+            for prev in pressure_waves:
+                score += dtw(prev, pressure)
+            dtw_scores.append(score / self.n_breaths)
+
+            pressure_waves.append(pressure)
+            flow_waves.append(flow)
+            if len(flow_waves) == (self.n_breaths+1):
+                flow_waves.pop(0)
+                pressure_waves.pop(0)
+
+        return np.array(dtw_scores)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -249,9 +290,10 @@ def main():
     parser.add_argument('--only-gk', action='store_true', help='only perform gk clustering for fuzzy clustering algo')
     parser.add_argument('--no-gk', action='store_true', help='dont run gk clustering')
     parser.add_argument('--cvc-only', action='store_true', help='only run cvc patients')
+    parser.add_argument('--dtw-n-breaths', type=int, default=5, help='n breaths to use for cross-reference when using DTW lookback analysis')
     args = parser.parse_args()
 
-    proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path, args.min_plat_time, args.flow_bound, args.any_or_all)
+    proc = Processing(args.cohort, args.raw_dataset_path, args.processed_dataset_path, args.min_plat_time, args.flow_bound, args.any_or_all, args.dtw_n_breaths)
     if not args.only_gk:
         proc.iter_raw_dir(args.only_patient, args.cvc_only)
     if not args.no_gk:

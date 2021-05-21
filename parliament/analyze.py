@@ -215,7 +215,7 @@ class FileCalculations(object):
             'patient', 'rel_bn', 'abs_bs', 'gold_stnd_compliance', 'ventmode', 'dta',
             'bsa', 'fa', 'fa_loc', 'static_dca', 'dyn_dca', 'dyn_dca_timing', 'artifact',
             'early_efforting', 'insp_efforting', 'exp_efforting', 'peep', 'tvi', 'p_plat',
-            'p_driving'
+            'p_driving', 'dtw',
         ]
         non_algo_cols = len(self.results_cols)
         for algo in self.algorithms_to_use:
@@ -842,14 +842,14 @@ class FileCalculations(object):
                 self.patient, rel_bn, abs_bs, gold, ventmode, ei_row.dta, ei_row.bsa, ei_row.fa,
                 ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
                 ei_row.artifact, early_efforting, insp_efforting, exp_efforting, peep,
-                tvi, plat, plat-peep,
+                tvi, plat, plat-peep, ei_row.dtw,
             ]
         else:
             breath_results = [
                 self.patient, rel_bn, abs_bs, self.recorded_gold, ventmode, ei_row.dta, ei_row.bsa,
                 ei_row.fa, ei_row.fa_loc, ei_row.static_dca, ei_row.dyn_dca, ei_row.dyn_dca_timing,
                 ei_row.artifact, early_efforting, insp_efforting, exp_efforting, peep,
-                tvi, self.recorded_plat, self.recorded_plat-peep,
+                tvi, self.recorded_plat, self.recorded_plat-peep, ei_row.dtw,
             ]
 
         for algo in self.algorithms_to_use:
