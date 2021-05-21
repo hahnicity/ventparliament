@@ -194,7 +194,35 @@ class ResultsContainer(object):
         plt.show(fig)
         return mad_std, algos_in_order
 
-    def _regplot_wmd(self, df, algo, x_col, win_size, ax, winsorizor, scatter_kws, absolute):
+    def _perform_single_window_analysis(self, df, absolute, winsorizor):
+        nrows = 4
+        plot_data = [
+            (0, 0, 'asynci_{}'.format(self.wmd_n)),
+            (0, 1, 'asynci_no_fam_{}'.format(self.wmd_n)),
+            (1, 0, 'dti_{}'.format(self.wmd_n)),
+            (1, 1, 'bsi_{}'.format(self.wmd_n)),
+            (2, 0, 'dci_{}'.format(self.wmd_n)),
+            (2, 1, 'fai_{}'.format(self.wmd_n)),
+            (3, 0, 'fai_no_fam_{}'.format(self.wmd_n)),
+            (3, 1, 'dtw_wm_{}'.format(self.wmd_n)),
+        ]
+        # for now just run some of the least squares algos
+        for algo in self.algos_used:
+            # dims are in wxh
+            fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
+            wmd_colname = '{}_wmd_{}'.format(algo, self.wmd_n)
+            for i, j, col in plot_data:
+                scatter_kws = {'s': 2, 'alpha': .5, 'edgecolors': 'black', 'color': 'blue'}
+                self._regplot_wmd(df, algo, col, self.wmd_n, axes[i][j], winsorizor, scatter_kws, {'label': 'tmp', 'lw': 5}, absolute)
+                x, y = axes[i][j].lines[0].get_data()
+                slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
+                handles, labels = axes[i][j].get_legend_handles_labels()
+                axes[i][j].legend(handles, ['n: {} slope: {}'.format(self.wmd_n, slope)], fontsize=16)
+
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
+            plt.show(fig)
+
+    def _regplot_wmd(self, df, algo, x_col, win_size, ax, winsorizor, scatter_kws, line_kws, absolute):
         """
         Perform regression plotting for WMD versus some index
 
@@ -213,7 +241,7 @@ class ResultsContainer(object):
             return
 
         abs_lmda = lambda x: np.abs(x) if absolute else x
-        lw = 4
+        line_kws.setdefault('lw', 4)
         data = df.copy()
         wmd_colname = '{}_wmd_{}'.format(algo, win_size)
         data[wmd_colname] = abs_lmda(data[wmd_colname])
@@ -223,11 +251,11 @@ class ResultsContainer(object):
             y=wmd_colname,
             data=data,
             scatter_kws=scatter_kws,
-            line_kws={'label': win_size, 'lw': lw},
+            line_kws=line_kws,
             ax=ax,
         )
         xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=lw)
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=line_kws['lw'])
         ax.set_xlim(xlim)
         ax.set_ylabel('Difference (estimated v. true)')
         xlabel = x_col.replace('_', ' ').replace(str(win_size), '').strip()
@@ -922,6 +950,62 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, title)
         plt.show(fig)
 
+    def perform_algo_based_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), algo_restrict=[]):
+        """
+        Perform multi-window analysis but centered on how algorithms differ by window
+        instead of how windows differ by algorithm. Basically we're doing a sensitivity
+        analysis by algorithm. We take a set window and then vary algorithms over it
+        to see which algo performs best for a certain window size
+
+        :param absolute: return absolute values for WMD calcs
+        :param windows: list of window sizes to use
+        :param winsorizor: (<low>, 1-<high>) percentiles to choose
+        :param algo_restrict: restrict to using only specific algorithms. must be a list of algos
+        """
+        nrows = 4
+        algos_to_use = self.algos_used if not algo_restrict else algo_restrict
+        plot_data = [
+            (0, 0, 'asynci_{}'),
+            (0, 1, 'asynci_no_fam_{}'),
+            (1, 0, 'dti_{}'),
+            (1, 1, 'bsi_{}'),
+            (2, 0, 'dci_{}'),
+            (2, 1, 'fai_{}'),
+            (3, 0, 'fai_no_fam_{}'),
+            (3, 1, 'dtw_wm_{}'),
+        ]
+        for win_size in windows:
+            self.set_new_wmd_n(win_size)
+
+        for size in windows:
+            fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
+
+            for i, j, col in plot_data:
+                win_col = col.format(size)
+
+                for algo in algos_to_use:
+                    if ('fai' in col and algo in FileCalculations.algos_unavailable_for_vc) or \
+                        ('dci' in col and algo in FileCalculations.algos_unavailable_for_pc_prvc):
+                        continue
+
+                    self._regplot_wmd(self.proc_results, algo, win_col, size, axes[i][j], winsorizor, {'s': 0, 'alpha': .0}, {'label': algo, 'lw': 3}, absolute)
+
+                if len(axes[i][j].lines) != 0:
+                    axes[i][j].legend(fontsize=14)
+                    y_min = sys.maxsize
+                    y_max = -sys.maxsize
+                    for line in axes[i][j].lines:
+                        x, y = line.get_data()
+                        if min(y) < y_min:
+                            y_min = min(y)
+                        if max(y) > y_max:
+                            y_max = max(y)
+                    min_ = y_min-5 if not absolute else -1
+                    axes[i][j].set_ylim((min_, y_max+5))
+
+            plt.suptitle('Window Size {}'.format(size), fontsize=28, y=.9)
+            plt.show(fig)
+
     def perform_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05)):
         """
         Show insights from analyzing multiple different window sizes for different
@@ -929,6 +1013,7 @@ class ResultsContainer(object):
 
         :param absolute: return absolute values for WMD calcs
         :param windows: list of window sizes to use
+        ;param winsorizor: (<low>, 1-<high>) percentiles to choose
         """
         # for now just run some of the least squares algos
         nrows = 4
@@ -951,7 +1036,7 @@ class ResultsContainer(object):
 
                 for size in windows:
                     win_col = col.format(size)
-                    self._regplot_wmd(self.proc_results, algo, win_col, size, axes[i][j], winsorizor, {'s': 0, 'alpha': .0}, absolute)
+                    self._regplot_wmd(self.proc_results, algo, win_col, size, axes[i][j], winsorizor, {'s': 0, 'alpha': .0}, {'label': size, 'lw': 3}, absolute)
 
                 if len(axes[i][j].lines) != 0:
                     axes[i][j].legend()
@@ -965,34 +1050,6 @@ class ResultsContainer(object):
                             y_max = max(y)
                     min_ = y_min-5 if not absolute else -1
                     axes[i][j].set_ylim((min_, y_max+5))
-
-            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
-            plt.show(fig)
-
-    def _perform_single_window_analysis(self, df, absolute, winsorizor):
-        nrows = 4
-        plot_data = [
-            (0, 0, 'asynci_{}'.format(self.wmd_n)),
-            (0, 1, 'asynci_no_fam_{}'.format(self.wmd_n)),
-            (1, 0, 'dti_{}'.format(self.wmd_n)),
-            (1, 1, 'bsi_{}'.format(self.wmd_n)),
-            (2, 0, 'dci_{}'.format(self.wmd_n)),
-            (2, 1, 'fai_{}'.format(self.wmd_n)),
-            (3, 0, 'fai_no_fam_{}'.format(self.wmd_n)),
-            (3, 1, 'dtw_wm_{}'.format(self.wmd_n)),
-        ]
-        # for now just run some of the least squares algos
-        for algo in self.algos_used:
-            # dims are in wxh
-            fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
-            wmd_colname = '{}_wmd_{}'.format(algo, self.wmd_n)
-            for i, j, col in plot_data:
-                scatter_kws = {'s': 2, 'alpha': .5, 'edgecolors': 'black', 'color': 'blue'}
-                self._regplot_wmd(df, algo, col, self.wmd_n, axes[i][j], winsorizor, scatter_kws, absolute)
-                x, y = axes[i][j].lines[0].get_data()
-                slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
-                handles, labels = axes[i][j].get_legend_handles_labels()
-                axes[i][j].legend(handles, ['n: {} slope: {}'.format(self.wmd_n, slope)], fontsize=16)
 
             plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
             plt.show(fig)
