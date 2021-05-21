@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
 from scipy.stats import median_absolute_deviation
+from scipy.stats.mstats import winsorize
 from seaborn.categorical import _BoxPlotter
 from seaborn.utils import remove_na
 import seaborn as sns
@@ -192,6 +193,45 @@ class ResultsContainer(object):
         display(HTML(soup.prettify()))
         plt.show(fig)
         return mad_std, algos_in_order
+
+    def _regplot_wmd(self, df, algo, x_col, win_size, ax, winsorizor, scatter_kws, absolute):
+        """
+        Perform regression plotting for WMD versus some index
+
+        :param df: DataFrame of results we want to analyze
+        """
+
+        # At least for now just skip the plot if its not sensible to perform
+        if ('fai' in x_col and algo in FileCalculations.algos_unavailable_for_vc) or \
+            ('dci' in x_col and algo in FileCalculations.algos_unavailable_for_pc_prvc):
+            ax.set_xlim((-1, 1))
+            ax.annotate('N/A due to algo restrictions', (-.5, 0), fontsize=22)
+            ax.set_ylim((-1, 1))
+            ax.set_ylabel('')
+            xlabel = x_col.replace('_', ' ').replace(str(win_size), '').strip()
+            ax.set_xlabel(xlabel)
+            return
+
+        abs_lmda = lambda x: np.abs(x) if absolute else x
+        lw = 4
+        data = df.copy()
+        wmd_colname = '{}_wmd_{}'.format(algo, win_size)
+        data[wmd_colname] = abs_lmda(data[wmd_colname])
+        data[wmd_colname] = winsorize(data[wmd_colname].values, limits=winsorizor)
+        sns.regplot(
+            x=x_col,
+            y=wmd_colname,
+            data=data,
+            scatter_kws=scatter_kws,
+            line_kws={'label': win_size, 'lw': lw},
+            ax=ax,
+        )
+        xlim = ax.get_xlim()
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=lw)
+        ax.set_xlim(xlim)
+        ax.set_ylabel('Difference (estimated v. true)')
+        xlabel = x_col.replace('_', ' ').replace(str(win_size), '').strip()
+        ax.set_xlabel(xlabel)
 
     def _show_breath_by_breath_algo_table(self, algos_in_order, medians, iqr, stds, title):
         """
@@ -391,12 +431,13 @@ class ResultsContainer(object):
         """
         for patiend_id, pt_df in df.groupby('patient_id'):
             for algo in self.algos_used:
-                df.loc[pt_df.index, '{}_wm'.format(algo)] = pt_df[algo].rolling(self.wmd_n, min_periods=1).apply(lambda x: np.nanmedian(x))
+                df.loc[pt_df.index, '{}_wm_{}'.format(algo, self.wmd_n)] = pt_df[algo].rolling(self.wmd_n, min_periods=1).apply(lambda x: np.nanmedian(x))
+            df.loc[pt_df.index, 'dtw_wm_{}'.format(self.wmd_n)] = pt_df['dtw'].rolling(self.wmd_n, min_periods=1).apply(lambda x: np.nanmedian(x))
 
         for algo in self.algos_used:
-            wm_colname = '{}_wm'.format(algo)
-            wmd_colname = '{}_wmd'.format(algo)
-            diff_colname = '{}_diff'.format(algo)
+            wm_colname = '{}_wm_{}'.format(algo, self.wmd_n)
+            wmd_colname = '{}_wmd_{}'.format(algo, self.wmd_n)
+            diff_colname = '{}_diff_{}'.format(algo, self.wmd_n)
             df[wmd_colname] = df.gold_stnd_compliance - df[wm_colname]
             # make sure algo calcs are null if not available for specific mode
             if algo in FileCalculations.algos_unavailable_for_vc:
@@ -454,7 +495,8 @@ class ResultsContainer(object):
                 #
                 # set min_periods to 4 because that can artificially inflate index
                 # to 1 in early bn for patient
-                df.loc[pt_df.index, index_col] = pt_df[async_cols].any(axis=1).astype(int).\
+                final_index_col = '{}_{}'.format(index_col, self.wmd_n)
+                df.loc[pt_df.index, final_index_col] = pt_df[async_cols].any(axis=1).astype(int).\
                     rolling(self.wmd_n, min_periods=4).apply(lambda x: np.nanmean(x))
 
     def collate_data(self, algos_used):
@@ -880,7 +922,7 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, title)
         plt.show(fig)
 
-    def perform_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100]):
+    def perform_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05)):
         """
         Show insights from analyzing multiple different window sizes for different
         algorithms.
@@ -888,54 +930,90 @@ class ResultsContainer(object):
         :param absolute: return absolute values for WMD calcs
         :param windows: list of window sizes to use
         """
-        lw = 4
-        abs_lmda = lambda x: np.abs(x) if absolute else x
         # for now just run some of the least squares algos
-        window_data = []
+        nrows = 4
+        plot_data = [
+            (0, 0, 'asynci_{}'),
+            (0, 1, 'asynci_no_fam_{}'),
+            (1, 0, 'dti_{}'),
+            (1, 1, 'bsi_{}'),
+            (2, 0, 'dci_{}'),
+            (2, 1, 'fai_{}'),
+            (3, 0, 'fai_no_fam_{}'),
+            (3, 1, 'dtw_wm_{}'),
+        ]
         for win_size in windows:
             self.set_new_wmd_n(win_size)
-            window_data.append(self.proc_results.copy())
 
         for algo in self.algos_used:
-            fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(3*8, 3*6))
-            wmd_colname = algo + '_wmd'
-            for i, j, col in [(0, 0, 'asynci'), (0, 1, 'asynci_no_fam'), (1, 0, 'insp_effi'), (1, 1, 'bsi')]:
-                for k, size in enumerate(windows):
-                    data = window_data[k]
-                    data[wmd_colname] = abs_lmda(data[wmd_colname])
-                    sns.regplot(
-                        x=col,
-                        y=wmd_colname,
-                        data=data,
-                        scatter_kws={'s': 0, 'alpha': .0},
-                        line_kws={'label': size, 'lw': lw},
-                        ax=axes[i][j],
-                    )
-                axes[i][j].set_ylabel('')
-                axes[i][j].set_xlabel(col.replace('_', ' '))
-                x, y = axes[i][j].lines[0].get_data()
-                #slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
-                #handles, labels = axes[i][j].get_legend_handles_labels()
-                #axes[i][j].legend(handles, ['n: {} slope: {}'.format(self.wmd_n, slope)], fontsize=16)
-                axes[i][j].legend()
-                xlim = axes[i][j].get_xlim()
-                axes[i][j].plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=lw)
-                axes[i][j].set_xlim(xlim)
-                y_min = sys.maxsize
-                y_max = -sys.maxsize
-                for line in axes[i][j].lines:
-                    x, y = line.get_data()
-                    if min(y) < y_min:
-                        y_min = min(y)
-                    if max(y) > y_max:
-                        y_max = max(y)
-                min_ = y_min-5 if not absolute else -1
-                axes[i][j].set_ylim((min_, y_max+5))
+            fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
+            for i, j, col in plot_data:
 
-            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=24)
+                for size in windows:
+                    win_col = col.format(size)
+                    self._regplot_wmd(self.proc_results, algo, win_col, size, axes[i][j], winsorizor, {'s': 0, 'alpha': .0}, absolute)
+
+                if len(axes[i][j].lines) != 0:
+                    axes[i][j].legend()
+                    y_min = sys.maxsize
+                    y_max = -sys.maxsize
+                    for line in axes[i][j].lines:
+                        x, y = line.get_data()
+                        if min(y) < y_min:
+                            y_min = min(y)
+                        if max(y) > y_max:
+                            y_max = max(y)
+                    min_ = y_min-5 if not absolute else -1
+                    axes[i][j].set_ylim((min_, y_max+5))
+
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
             plt.show(fig)
 
-    def perform_single_window_analysis(self, absolute=True):
+    def _perform_single_window_analysis(self, df, absolute, winsorizor):
+        nrows = 4
+        plot_data = [
+            (0, 0, 'asynci_{}'.format(self.wmd_n)),
+            (0, 1, 'asynci_no_fam_{}'.format(self.wmd_n)),
+            (1, 0, 'dti_{}'.format(self.wmd_n)),
+            (1, 1, 'bsi_{}'.format(self.wmd_n)),
+            (2, 0, 'dci_{}'.format(self.wmd_n)),
+            (2, 1, 'fai_{}'.format(self.wmd_n)),
+            (3, 0, 'fai_no_fam_{}'.format(self.wmd_n)),
+            (3, 1, 'dtw_wm_{}'.format(self.wmd_n)),
+        ]
+        # for now just run some of the least squares algos
+        for algo in self.algos_used:
+            # dims are in wxh
+            fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
+            wmd_colname = '{}_wmd_{}'.format(algo, self.wmd_n)
+            for i, j, col in plot_data:
+                scatter_kws = {'s': 2, 'alpha': .5, 'edgecolors': 'black', 'color': 'blue'}
+                self._regplot_wmd(df, algo, col, self.wmd_n, axes[i][j], winsorizor, scatter_kws, absolute)
+                x, y = axes[i][j].lines[0].get_data()
+                slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
+                handles, labels = axes[i][j].get_legend_handles_labels()
+                axes[i][j].legend(handles, ['n: {} slope: {}'.format(self.wmd_n, slope)], fontsize=16)
+
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
+            plt.show(fig)
+
+    def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05)):
+        """
+        :param patient_breath_map: mapping of {patient: [bn_low, bn_high]} to use
+        :param absolute: return absolute values for WMD calcs
+        ;param winsorizor: (<low>, 1-<high>) percentiles to choose
+        """
+        idxs = None
+        for patient, bns in patient_breath_map.items():
+            tmp = self.proc_results[(self.proc_results.patient == patient) & (self.proc_results.rel_bn >= bns[0]) & (self.proc_results.rel_bn <= bns[1])].index
+            if isinstance(idxs, type(None)):
+                idxs = tmp
+            else:
+                idxs = idxs.append(tmp)
+        df = self.proc_results.loc[idxs]
+        self._perform_single_window_analysis(df, absolute, winsorizor)
+
+    def perform_single_window_analysis(self, absolute=True, winsorizor=(0, 0.05)):
         """
         Show insights form analyzing windowed calculations
 
@@ -943,36 +1021,9 @@ class ResultsContainer(object):
                    window's performance across varying scenarios.
 
         :param absolute: return absolute values for WMD calcs
+        ;param winsorizor: (<low>, 1-<high>) percentiles to choose
         """
-        lw = 4
-        abs_lmda = lambda x: np.abs(x) if absolute else x
-        # for now just run some of the least squares algos
-        for algo in self.algos_used:
-            fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(3*8, 3*6))
-            wmd_colname = algo + '_wmd'
-            for i, j, col in [(0, 0, 'asynci'), (0, 1, 'asynci_no_fam'), (1, 0, 'insp_effi'), (1, 1, 'bsi')]:
-                data = self.proc_results.copy()
-                data[wmd_colname] = abs_lmda(data[wmd_colname])
-                sns.regplot(
-                    x=col,
-                    y=wmd_colname,
-                    data=data,
-                    scatter_kws={'s': 2, 'alpha': .5, 'edgecolors': 'black', 'color': 'blue'},
-                    line_kws={'label': 'regression', 'lw': lw},
-                    ax=axes[i][j],
-                )
-                axes[i][j].set_ylabel('')
-                axes[i][j].set_xlabel(col.replace('_', ' '))
-                x, y = axes[i][j].lines[0].get_data()
-                slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
-                handles, labels = axes[i][j].get_legend_handles_labels()
-                axes[i][j].legend(handles, ['n: {} slope: {}'.format(self.wmd_n, slope)], fontsize=16)
-                xlim = axes[i][j].get_xlim()
-                axes[i][j].plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=lw)
-                axes[i][j].set_xlim(xlim)
-
-            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=24)
-            plt.show(fig)
+        self._perform_single_window_analysis(self.proc_results, absolute, winsorizor)
 
     def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[]):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
@@ -1201,7 +1252,10 @@ class ResultsContainer(object):
         :param wmd_n: new length of WMD window
         """
         self.wmd_n = wmd_n
-        self.analyze_results()
+        # make sure to only analyze results if we haven't previously done the
+        # analysis for this window size before. Just use asynci as our canary
+        if not 'asynci_{}'.format(wmd_n) in self.proc_results.columns:
+            self.analyze_results()
 
     def visualize_patient(self, patient, algos, extra_mask=None, ts_xlim=None, ts_ylim=None):
         if algos == 'all':
@@ -1209,21 +1263,21 @@ class ResultsContainer(object):
         algo_cols = algos
         diff_cols = ['{}_diff'.format(c) for c in algo_cols]
         wmd_cols = ['{}_wmd'.format(c) for c in algo_cols]
-        final_cols = algo_cols + diff_cols + wmd_cols + ['gold_stnd_compliance', 'patient_id']
+        final_cols = algo_cols + diff_cols + wmd_cols + ['rel_bn', 'gold_stnd_compliance', 'patient_id']
 
         if not isinstance(extra_mask, type(None)):
             patient_df = self.proc_results[(self.proc_results.patient == patient) & extra_mask][final_cols]
         else:
             patient_df = self.proc_results[self.proc_results.patient == patient][final_cols]
 
-        patient_df[algo_cols].plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
+        patient_df[['rel_bn']+algo_cols].plot(x='rel_bn', figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
         plt.legend(fontsize=16)
         plt.title(patient, fontsize=20)
         if ts_xlim is not None:
             plt.xlim(ts_xlim)
         if ts_ylim is not None:
             plt.ylim(ts_ylim)
-        plt.plot(patient_df.gold_stnd_compliance, label='gt')
+        plt.plot(patient_df.rel_bn, patient_df.gold_stnd_compliance, label='gt')
         plt.show()
 
         pp_custom = self.analyze_per_patient_df(patient_df)

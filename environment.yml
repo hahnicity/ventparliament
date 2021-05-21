@@ -14,6 +14,7 @@ dependencies:
   - pip
   - scikit-learn
   - pip:
+    - git+git://github.com/lukauskas/dtwco.git#egg=dtwco
     - beautifulsoup4
     - colorcet
     - git+https://github.com/hahnicity/fuzzy-clustering.git
