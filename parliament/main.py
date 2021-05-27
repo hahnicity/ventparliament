@@ -194,7 +194,7 @@ class ResultsContainer(object):
         plt.show(fig)
         return mad_std, algos_in_order
 
-    def _perform_single_window_analysis(self, df, absolute, winsorizor):
+    def _perform_single_window_analysis(self, df, absolute, winsorizor, algos):
         nrows = 4
         plot_data = [
             (0, 0, 'asynci_{}'.format(self.wmd_n)),
@@ -206,14 +206,17 @@ class ResultsContainer(object):
             (3, 0, 'fai_no_fam_{}'.format(self.wmd_n)),
             (3, 1, 'dtw_wm_{}'.format(self.wmd_n)),
         ]
+        algos = algos if algos != [] else self.algos_used
         # for now just run some of the least squares algos
-        for algo in self.algos_used:
+        for algo in algos:
             # dims are in wxh
             fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
             wmd_colname = '{}_wmd_{}'.format(algo, self.wmd_n)
             for i, j, col in plot_data:
                 scatter_kws = {'s': 2, 'alpha': .5, 'edgecolors': 'black', 'color': 'blue'}
-                self._regplot_wmd(df, algo, col, self.wmd_n, axes[i][j], winsorizor, scatter_kws, {'label': 'tmp', 'lw': 5}, absolute)
+                resp = self._regplot_wmd(df, algo, col, self.wmd_n, axes[i][j], winsorizor, scatter_kws, {'label': 'tmp', 'lw': 5}, absolute)
+                if not resp:
+                    continue
                 x, y = axes[i][j].lines[0].get_data()
                 slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
                 handles, labels = axes[i][j].get_legend_handles_labels()
@@ -238,7 +241,7 @@ class ResultsContainer(object):
             ax.set_ylabel('')
             xlabel = x_col.replace('_', ' ').replace(str(win_size), '').strip()
             ax.set_xlabel(xlabel)
-            return
+            return False
 
         abs_lmda = lambda x: np.abs(x) if absolute else x
         line_kws.setdefault('lw', 4)
@@ -260,6 +263,7 @@ class ResultsContainer(object):
         ax.set_ylabel('Difference (estimated v. true)')
         xlabel = x_col.replace('_', ' ').replace(str(win_size), '').strip()
         ax.set_xlabel(xlabel)
+        return True
 
     def _show_breath_by_breath_algo_table(self, algos_in_order, medians, iqr, stds, title):
         """
@@ -950,7 +954,7 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, title)
         plt.show(fig)
 
-    def perform_algo_based_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), algo_restrict=[]):
+    def perform_algo_based_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), algos=[]):
         """
         Perform multi-window analysis but centered on how algorithms differ by window
         instead of how windows differ by algorithm. Basically we're doing a sensitivity
@@ -960,10 +964,10 @@ class ResultsContainer(object):
         :param absolute: return absolute values for WMD calcs
         :param windows: list of window sizes to use
         :param winsorizor: (<low>, 1-<high>) percentiles to choose
-        :param algo_restrict: restrict to using only specific algorithms. must be a list of algos
+        :param algos: restrict to using only specific algorithms. must be a list of algos
         """
         nrows = 4
-        algos_to_use = self.algos_used if not algo_restrict else algo_restrict
+        algos_to_use = self.algos_used if not algos else algos
         plot_data = [
             (0, 0, 'asynci_{}'),
             (0, 1, 'asynci_no_fam_{}'),
@@ -1054,11 +1058,12 @@ class ResultsContainer(object):
             plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
             plt.show(fig)
 
-    def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05)):
+    def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05), algos=[]):
         """
         :param patient_breath_map: mapping of {patient: [bn_low, bn_high]} to use
         :param absolute: return absolute values for WMD calcs
-        ;param winsorizor: (<low>, 1-<high>) percentiles to choose
+        :param winsorizor: (<low>, 1-<high>) percentiles to choose
+        :param algos: list of algos to use
         """
         idxs = None
         for patient, bns in patient_breath_map.items():
@@ -1068,9 +1073,9 @@ class ResultsContainer(object):
             else:
                 idxs = idxs.append(tmp)
         df = self.proc_results.loc[idxs]
-        self._perform_single_window_analysis(df, absolute, winsorizor)
+        self._perform_single_window_analysis(df, absolute, winsorizor, algos)
 
-    def perform_single_window_analysis(self, absolute=True, winsorizor=(0, 0.05)):
+    def perform_single_window_analysis(self, absolute=True, winsorizor=(0, 0.05), algos=[]):
         """
         Show insights form analyzing windowed calculations
 
@@ -1078,9 +1083,10 @@ class ResultsContainer(object):
                    window's performance across varying scenarios.
 
         :param absolute: return absolute values for WMD calcs
-        ;param winsorizor: (<low>, 1-<high>) percentiles to choose
+        :param winsorizor: (<low>, 1-<high>) percentiles to choose
+        :param algos: list of algos to use
         """
-        self._perform_single_window_analysis(self.proc_results, absolute, winsorizor)
+        self._perform_single_window_analysis(self.proc_results, absolute, winsorizor, algos)
 
     def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[]):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
