@@ -295,7 +295,7 @@ class ResultsContainer(object):
             )
 
         # XXX can implement smoother to enable dtw viz. but until then, median just
-        # looks like a jagged mess
+        # looks like a jagged mess. You can also do scatter for DTW median too.
         if show_median and 'dtw' not in x_col:
             medians = []
             x = []
