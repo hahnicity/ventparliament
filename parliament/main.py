@@ -22,13 +22,14 @@ from scipy.stats.mstats import winsorize
 from seaborn.categorical import _BoxPlotter
 from seaborn.utils import remove_na
 import seaborn as sns
+from skimage.util.shape import view_as_windows
 
 from parliament.analyze import FileCalculations
 
 
 class ResultsContainer(object):
 
-    def __init__(self, experiment_name, wmd_n):
+    def __init__(self, experiment_name, window_n):
         self.proc_results = []
         self.algos_used = []
         self.experiment_name = experiment_name
@@ -37,7 +38,7 @@ class ResultsContainer(object):
         # you can always crank the dpi up for paper time
         self.dpi = 200
         self.boot_resamples = 100
-        self.wmd_n = wmd_n
+        self.window_n = window_n
         self.full_analysis_done = False
         self.scatter_marker_symbols = [
             'o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H',
@@ -113,7 +114,7 @@ class ResultsContainer(object):
         td.insert(0, soup.new_tag('b'))
         td.b.string = val
 
-    def _mad_std_scatter(self, mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim):
+    def _mad_std_scatter(self, mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim):
         """
         Perform scatter plot using with MAD and std information for each algorithm.
         """
@@ -168,7 +169,7 @@ class ResultsContainer(object):
 
         fig.legend(fontsize=16, loc='center right')
         ax.set_title(plt_title, fontsize=20)
-        figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-use-wmd-{}.png'.format(use_wmd))
+        figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-windowing-{}.png'.format(windowing))
         fig.savefig(figname, dpi=self.dpi)
 
         # show table of boxplot results
@@ -199,24 +200,24 @@ class ResultsContainer(object):
     def _perform_single_window_analysis(self, df, absolute, winsorizor, algos, robust, robust_and_reg, show_median):
         nrows = 4
         plot_data = [
-            (0, 0, 'asynci_{}'.format(self.wmd_n)),
-            (0, 1, 'asynci_no_fam_{}'.format(self.wmd_n)),
-            (1, 0, 'dti_{}'.format(self.wmd_n)),
-            (1, 1, 'bsi_{}'.format(self.wmd_n)),
-            (2, 0, 'dci_{}'.format(self.wmd_n)),
-            (2, 1, 'fai_{}'.format(self.wmd_n)),
-            (3, 0, 'fai_no_fam_{}'.format(self.wmd_n)),
-            (3, 1, 'dtw_wm_{}'.format(self.wmd_n)),
+            (0, 0, 'asynci_{}'.format(self.window_n)),
+            (0, 1, 'asynci_no_fam_{}'.format(self.window_n)),
+            (1, 0, 'dti_{}'.format(self.window_n)),
+            (1, 1, 'bsi_{}'.format(self.window_n)),
+            (2, 0, 'dci_{}'.format(self.window_n)),
+            (2, 1, 'fai_{}'.format(self.window_n)),
+            (3, 0, 'fai_no_fam_{}'.format(self.window_n)),
+            (3, 1, 'dtw_wm_{}'.format(self.window_n)),
         ]
         algos = algos if algos != [] else self.algos_used
         # for now just run some of the least squares algos
         for algo in algos:
             # dims are in wxh
             fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
-            wmd_colname = '{}_wmd_{}'.format(algo, self.wmd_n)
+            wmd_colname = '{}_wmd_{}'.format(algo, self.window_n)
             for i, j, col in plot_data:
                 scatter_kws = {'s': 2, 'alpha': .5, 'edgecolors': 'black', 'color': 'blue'}
-                resp = self._regplot_wmd(df, algo, col, self.wmd_n, axes[i][j], winsorizor, scatter_kws, {'label': 'tmp', 'lw': 5}, absolute, robust, robust_and_reg, show_median)
+                resp = self._regplot_wmd(df, algo, col, self.window_n, axes[i][j], winsorizor, scatter_kws, {'label': 'tmp', 'lw': 5}, absolute, robust, robust_and_reg, show_median)
                 if not resp:
                     continue
 
@@ -224,14 +225,14 @@ class ResultsContainer(object):
                 if not robust_and_reg:
                     x, y = axes[i][j].lines[0].get_data()
                     slope = round((y[-1] - y[0]) / (x[-1] - x[0]), 2)
-                    new_labels = ['n: {} slope: {}'.format(self.wmd_n, slope)]
+                    new_labels = ['n: {} slope: {}'.format(self.window_n, slope)]
                 else:
                     new_labels = labels
                 if not robust_and_reg and len(labels) > 1:
                     new_labels += labels[1:]
                 axes[i][j].legend(handles, new_labels, fontsize=16)
 
-            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28, y=.9)
             plt.show(fig)
 
     def _regplot_wmd(self, df, algo, x_col, win_size, ax, winsorizor, scatter_kws, line_kws, absolute, robust, robust_and_reg, show_median):
@@ -314,9 +315,9 @@ class ResultsContainer(object):
 
     def _set_new_frame(self, dict_, name, frame):
         if name not in dict_:
-            dict_[name] = {self.wmd_n: frame}
+            dict_[name] = {self.window_n: frame}
         else:
-            dict_[name][self.wmd_n] = frame
+            dict_[name][self.window_n] = frame
 
     def _set_new_frames(self, name, frame):
         self._set_new_frame(self.bb_frames, name, frame)
@@ -396,12 +397,14 @@ class ResultsContainer(object):
             algos_in_frame = set(df.columns).intersection(self.algos_used)
             for algo in algos_in_frame:
                 row = [patient_id, algo]
-                row.append(median_absolute_deviation(frame['{}_diff'.format(algo, self.wmd_n)], nan_policy='omit'))
+                row.append(np.nanmedian(frame['{}_diff'.format(algo, self.window_n)].abs()))
                 row.append(frame[algo].std())
-                row.append(median_absolute_deviation(frame['{}_wmd_{}'.format(algo, self.wmd_n)], nan_policy='omit'))
-                row.append(frame['{}_wmd_{}'.format(algo, self.wmd_n)].std())
+                row.append(np.nanmedian(frame['{}_wmd_{}'.format(algo, self.window_n)].abs()))
+                row.append(frame['{}_wmd_{}'.format(algo, self.window_n)].std())
+                row.append(np.nanmedian(frame['{}_smd_{}'.format(algo, self.window_n)].abs()))
+                row.append(frame['{}_smd_{}'.format(algo, self.window_n)].std())
                 row_results.append(row)
-        cols = ['patient_id', 'algo', 'mad_pt', 'std_pt', 'mad_wmd', 'std_wmd']
+        cols = ['patient_id', 'algo', 'mad_pt', 'std_pt', 'mad_wmd', 'std_wmd', 'mad_smd', 'std_smd']
         return pd.DataFrame(row_results, columns=cols)
 
     def analyze_results(self):
@@ -418,7 +421,7 @@ class ResultsContainer(object):
 
         for algo in self.algos_used:
             self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
-        self.calc_wmd(self.proc_results)
+        self.calc_windows(self.proc_results)
         self.calc_async_index(self.proc_results)
 
         masks = self.get_masks()
@@ -513,28 +516,49 @@ class ResultsContainer(object):
         self.full_analysis_done = True
         pd.to_pickle(self, self.results_dir.joinpath('ResultsContainer.pkl'))
 
-    def calc_wmd(self, df):
+    def calc_windows(self, df):
         """
-        Calculates the windowed median deviation (WMD) of an algorithm for
-        a set window size.
+        Calculates the windowed stats of an algorithm for
+        a set window size. Calcs windowed median deviation (WMD) and sequential
+        median deviation (SMD).
 
         Note: WM = window median
         """
         for patiend_id, pt_df in df.groupby('patient_id'):
             for algo in self.algos_used:
-                df.loc[pt_df.index, '{}_wm_{}'.format(algo, self.wmd_n)] = pt_df[algo].rolling(self.wmd_n, min_periods=self.wmd_n).apply(lambda x: np.nanmedian(x))
-            df.loc[pt_df.index, 'dtw_wm_{}'.format(self.wmd_n)] = pt_df['dtw'].rolling(self.wmd_n, min_periods=self.wmd_n).apply(lambda x: np.nanmedian(x))
+                df.loc[pt_df.index, '{}_wm_{}'.format(algo, self.window_n)] = pt_df[algo].rolling(self.window_n, min_periods=self.window_n).apply(lambda x: np.nanmedian(x))
+            df.loc[pt_df.index, 'dtw_wm_{}'.format(self.window_n)] = pt_df['dtw'].rolling(self.window_n, min_periods=self.window_n).apply(lambda x: np.nanmedian(x))
 
         for algo in self.algos_used:
-            wm_colname = '{}_wm_{}'.format(algo, self.wmd_n)
-            wmd_colname = '{}_wmd_{}'.format(algo, self.wmd_n)
-            diff_colname = '{}_diff_{}'.format(algo, self.wmd_n)
+            wm_colname = '{}_wm_{}'.format(algo, self.window_n)
+            wmd_colname = '{}_wmd_{}'.format(algo, self.window_n)
+            diff_colname = '{}_diff_{}'.format(algo, self.window_n)
             df[wmd_colname] = df.gold_stnd_compliance - df[wm_colname]
             # make sure algo calcs are null if not available for specific mode
             if algo in FileCalculations.algos_unavailable_for_vc:
                 df.loc[df.ventmode == 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
             elif algo in FileCalculations.algos_unavailable_for_pc_prvc:
                 df.loc[df.ventmode != 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
+
+        for patiend_id, pt_df in df.groupby('patient_id'):
+            for algo in self.algos_used:
+                # reshape for strides.
+                strides = view_as_windows(pt_df[algo].values, (self.window_n,), step=self.window_n)
+                len_medians = strides.shape[0]
+                tmp = np.nanmedian(strides, axis=1)
+                tmp = np.expand_dims(tmp, axis=0)
+                tmp = np.pad(tmp.T, (0, self.window_n-1), constant_values=np.nan)[:len_medians].ravel()
+                tmp = np.pad(tmp, (0, len(pt_df)-len(tmp)), constant_values=np.nan)
+                df.loc[pt_df.index, '{}_sm_{}'.format(algo, self.window_n)] = tmp
+
+        for algo in self.algos_used:
+            sm_colname = '{}_sm_{}'.format(algo, self.window_n)
+            smd_colname = '{}_smd_{}'.format(algo, self.window_n)
+            df[smd_colname] = df.gold_stnd_compliance - df[sm_colname]
+            if algo in FileCalculations.algos_unavailable_for_vc:
+                df.loc[df.ventmode == 'vc', [sm_colname, smd_colname]] = np.nan
+            elif algo in FileCalculations.algos_unavailable_for_pc_prvc:
+                df.loc[df.ventmode != 'vc', [sm_colname, smd_colname]] = np.nan
 
     def calc_async_index(self, df):
         """
@@ -583,9 +607,9 @@ class ResultsContainer(object):
                 # in one breath. For now I dont know if this is a huge deal but
                 # it def. introduces some inaccuracy in the index vals because
                 # they may be artificially higher than what they would be normally
-                final_index_col = '{}_{}'.format(index_col, self.wmd_n)
+                final_index_col = '{}_{}'.format(index_col, self.window_n)
                 df.loc[pt_df.index, final_index_col] = pt_df[async_cols].any(axis=1).astype(int).\
-                    rolling(self.wmd_n, min_periods=self.wmd_n).apply(lambda x: np.nanmean(x))
+                    rolling(self.window_n, min_periods=self.window_n).apply(lambda x: np.nanmean(x))
 
     def collate_data(self, algos_used):
         """
@@ -630,14 +654,14 @@ class ResultsContainer(object):
                 # will do no real good to inform the actual implementation science.
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
 
-    def compare_patient_level_masks(self, mask1_name, mask2_name, use_wmd, individual_patients=False, std_lim=None):
+    def compare_patient_level_masks(self, mask1_name, mask2_name, windowing, individual_patients=False, std_lim=None):
         """
         Compare results of different masks to each other on patient by patient basis.
         Plot results out with scatter plots as usual.
 
         :param mask1_name: mask name based on masks obtained from `get_masks`
         :param mask2_name: mask name based on masks obtained from `get_masks`
-        :param use_wmd: (bool) use windowed median deviation or no?
+        :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
         """
         masks = self.get_masks()
         mask1 = masks[mask1_name]
@@ -647,8 +671,8 @@ class ResultsContainer(object):
         pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
         algos_in_order = sorted(list(pp1.algo.unique()))
 
-        mad_std1, _ = self.preprocess_mad_std_in_df(pp1, use_wmd)
-        mad_std2, _ = self.preprocess_mad_std_in_df(pp2, use_wmd)
+        mad_std1, _ = self.preprocess_mad_std_in_df(pp1, windowing)
+        mad_std2, _ = self.preprocess_mad_std_in_df(pp2, windowing)
 
         mad_std = copy(mad_std1)
         for algo in algos_in_order:
@@ -657,7 +681,7 @@ class ResultsContainer(object):
 
         plt_title = '{} vs {}'.format(mask1_name, mask2_name)
         figname = '{}_vs_{}.png'.format(mask1_name, mask2_name)
-        return self._mad_std_scatter(mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim)
+        return self._mad_std_scatter(mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim)
 
     def compare_breath_level_masks(self, mask1_name, mask2_name, figname='custom_breath_by_breath.png'):
         """
@@ -917,17 +941,22 @@ class ResultsContainer(object):
             'vc_only': (self.proc_results.ventmode == 'vc'),
         }
 
-    def preprocess_mad_std_in_df(self, df, use_wmd):
+    def preprocess_mad_std_in_df(self, df, windowing):
         # Do scatter of MAD by std
         algos_in_frame = sorted(list(df.algo.unique()))
         mad_std = {algo: [[], [], None, None, None] for algo in algos_in_frame}
         algo_dists = []
-        if not use_wmd:
+        if windowing is None:
             mad_col = 'mad_pt'
             std_col = 'std_pt'
-        else:
+        elif windowing == 'wmd':
             mad_col = 'mad_wmd'
             std_col = 'std_wmd'
+        elif windowing == 'smd':
+            mad_col = 'mad_smd'
+            std_col = 'std_smd'
+        else:
+            raise ValueError('windowing variable must be None, "wmd", or "smd"')
 
         for algo in algos_in_frame:
             # mad on x axis, std on y
@@ -949,38 +978,41 @@ class ResultsContainer(object):
         algos_in_order = sorted(algos_used)
         return mad_std, algos_in_order
 
-    def plot_algo_scatter(self, df, use_wmd, plt_title, figname, individual_patients, std_lim):
+    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
         X-axis is MAD and Y-axis is std.
         """
         algos_in_frame = sorted(list(df.algo.unique()))
-        mad_std, algos_in_order = self.preprocess_mad_std_in_df(df, use_wmd)
-        return self._mad_std_scatter(mad_std, use_wmd, plt_title, figname, algos_in_order, individual_patients, std_lim)
+        mad_std, algos_in_order = self.preprocess_mad_std_in_df(df, windowing)
+        return self._mad_std_scatter(mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim)
 
-    def plot_algo_mad_std_boxplots(self, df, algo_ordering, use_wmd, figname_prefix):
+    def plot_algo_mad_std_boxplots(self, df, algo_ordering, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         # you can use bootstrap too if you want, but for now I'm not going to
-        if not use_wmd:
+        if windowing is None:
             mad_col = 'mad_pt'
             std_col = 'std_pt'
-        else:
+        elif windowing == 'wmd':
             mad_col = 'mad_wmd'
             std_col = 'std_wmd'
+        elif windowing == 'smd':
+            mad_col = 'mad_smd'
+            std_col = 'std_smd'
 
         sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
         ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 26)
-        fig.savefig(self.results_dir.joinpath('{}_mad_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
+        fig.savefig(self.results_dir.joinpath('{}_mad_windowing_{}_boxplot_result.png'.format(windowing, figname_prefix)).resolve(), dpi=self.dpi)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True, showfliers=False)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 31)
-        fig.savefig(self.results_dir.joinpath('{}_std_wmd_{}_boxplot_result.png'.format(use_wmd, figname_prefix)).resolve(), dpi=self.dpi)
+        fig.savefig(self.results_dir.joinpath('{}_std_windowing_{}_boxplot_result.png'.format(windowing, figname_prefix)).resolve(), dpi=self.dpi)
 
     def show_individual_breath_by_breath_frame_results(self, df, figname):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
@@ -1035,7 +1067,7 @@ class ResultsContainer(object):
             (3, 1, 'dtw_wm_{}'),
         ]
         for win_size in windows:
-            self.set_new_wmd_n(win_size)
+            self.set_new_window_n(win_size)
 
         for size in windows:
             fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
@@ -1089,7 +1121,7 @@ class ResultsContainer(object):
             (3, 1, 'dtw_wm_{}'),
         ]
         for win_size in windows:
-            self.set_new_wmd_n(win_size)
+            self.set_new_window_n(win_size)
 
         for algo in self.algos_used:
             fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(3*8, 3*nrows*3))
@@ -1112,7 +1144,7 @@ class ResultsContainer(object):
                     min_ = y_min-5 if not absolute else -1
                     axes[i][j].set_ylim((min_, y_max+5))
 
-            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.wmd_n), fontsize=28, y=.9)
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28, y=.9)
             plt.show(fig)
 
     def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05), algos=[], robust=False, robust_and_reg=False, show_median=False):
@@ -1159,83 +1191,83 @@ class ResultsContainer(object):
             'breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_async'][self.window_n], only_patient), exclude_cols),
             'no_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only'][self.window_n], only_patient), exclude_cols),
             'vc_only_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_no_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_no_async'][self.window_n], only_patient), exclude_cols),
             'vc_no_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only_async'][self.window_n], only_patient), exclude_cols),
             'vc_only_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only'][self.window_n], only_patient), exclude_cols),
             'pc_only_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_no_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_no_async'][self.window_n], only_patient), exclude_cols),
             'pc_no_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only_async'][self.window_n], only_patient), exclude_cols),
             'pc_only_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only'][self.window_n], only_patient), exclude_cols),
             'prvc_only_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_no_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_no_async'][self.window_n], only_patient), exclude_cols),
             'prvc_no_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only_async'][self.window_n], only_patient), exclude_cols),
             'prvc_only_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_efforting'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_efforting'][self.window_n], only_patient), exclude_cols),
             'no_efforting_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['early_efforting'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['early_efforting'][self.window_n], only_patient), exclude_cols),
             'early_efforting_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['insp_efforting'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['insp_efforting'][self.window_n], only_patient), exclude_cols),
             'insp_efforting_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['exp_efforting'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['exp_efforting'][self.window_n], only_patient), exclude_cols),
             'exp_efforting_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_efforting'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_efforting'][self.window_n], only_patient), exclude_cols),
             'all_efforting_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only'][self.window_n], only_patient), exclude_cols),
             'pc_prvc_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_no_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_no_async'][self.window_n], only_patient), exclude_cols),
             'pc_prvc_no_async_breath_by_breath_results.png'
         )
         self.show_individual_breath_by_breath_frame_results(
-            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only_async'][self.wmd_n], only_patient), exclude_cols),
+            exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only_async'][self.window_n], only_patient), exclude_cols),
             'pc_prvc_only_async_breath_by_breath_results.png'
         )
 
-    def plot_per_patient_results(self, use_wmd, individual_patients=False, show_boxplots=True, std_lim=None):
+    def plot_per_patient_results(self, windowing, individual_patients=False, show_boxplots=True, std_lim=None):
         """
         Plot patient by patient results
 
-        :param use_wmd: use wmd or no?
+        :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
         :param individual_patients: show individual_patients scatter points
         :param show_boxplots: show boxplots after scatter plots
         :param std_lim: limit graphs by standard deviation within certain
@@ -1244,56 +1276,56 @@ class ResultsContainer(object):
         """
         # Patient by Patient. All breathing
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['all'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['all'][self.window_n],
+            windowing,
             'Patient by patient results. No filters',
             'patient_by_patient_result.png',
             individual_patients,
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['all'][self.wmd_n], algos_in_order, use_wmd, 'patient_by_patient')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['all'][self.window_n], algos_in_order, windowing, 'patient_by_patient')
 
         # Patient by patient. no asynchronies
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['no_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['no_async'][self.window_n],
+            windowing,
             'Patient by patient results. No Asynchronies',
             'patient_by_patient_no_async_result.png',
             individual_patients,
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['no_async'][self.wmd_n], algos_in_order, use_wmd, 'patient_by_patient_no_async')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['no_async'][self.window_n], algos_in_order, windowing, 'patient_by_patient_no_async')
 
         # Asynchronies only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['async'][self.window_n],
+            windowing,
             'Patient by patient results. Asynchronies only',
             'patient_by_patient_asynchronies_only.png',
             individual_patients,
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['async'][self.wmd_n], algos_in_order, use_wmd, 'asynchronies_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['async'][self.window_n], algos_in_order, windowing, 'asynchronies_only_pbp')
 
         # VC only patient by patient.
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['vc_only'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['vc_only'][self.window_n],
+            windowing,
             'Patient by patient results. VC only',
             'patient_by_patient_vc_only.png',
             individual_patients,
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['vc_only'][self.wmd_n], algos_in_order, use_wmd, 'vc_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['vc_only'][self.window_n], algos_in_order, windowing, 'vc_only_pbp')
 
         # VC only, non-asynchronies
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['vc_no_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['vc_no_async'][self.window_n],
+            windowing,
             'Patient by patient results. VC, No Asynchronies',
             'patient_by_patient_vc_no_asynchronies.png',
             individual_patients,
@@ -1302,8 +1334,8 @@ class ResultsContainer(object):
 
         # VC only, asynchronies only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['vc_only_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['vc_only_async'][self.window_n],
+            windowing,
             'Patient by patient results. VC Asynchronies only',
             'patient_by_patient_vc_asynchronies_only.png',
             individual_patients,
@@ -1312,20 +1344,20 @@ class ResultsContainer(object):
 
         # PC only patient by patient.
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['pc_only'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['pc_only'][self.window_n],
+            windowing,
             'Patient by patient results. PC only',
             'patient_by_patient_pc_only.png',
             individual_patients,
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['pc_only'][self.wmd_n], algos_in_order, use_wmd, 'pc_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['pc_only'][self.window_n], algos_in_order, windowing, 'pc_only_pbp')
 
         # PC only, non-asynchronies
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['pc_no_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['pc_no_async'][self.window_n],
+            windowing,
             'Patient by patient results. PC, No Asynchronies',
             'patient_by_patient_pc_no_asynchronies.png',
             individual_patients,
@@ -1334,8 +1366,8 @@ class ResultsContainer(object):
 
         # PC only, asynchronies only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['pc_only_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['pc_only_async'][self.window_n],
+            windowing,
             'Patient by patient results. PC Asynchronies only',
             'patient_by_patient_pc_asynchronies_only.png',
             individual_patients,
@@ -1344,20 +1376,20 @@ class ResultsContainer(object):
 
         # PRVC only patient by patient.
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['prvc_only'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['prvc_only'][self.window_n],
+            windowing,
             'Patient by patient results. PRVC only',
             'patient_by_patient_prvc_only.png',
             individual_patients,
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['prvc_only'][self.wmd_n], algos_in_order, use_wmd, 'prvc_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['prvc_only'][self.window_n], algos_in_order, windowing, 'prvc_only_pbp')
 
         # PRVC only, non-asynchronies
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['prvc_no_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['prvc_no_async'][self.window_n],
+            windowing,
             'Patient by patient results. PRVC, No Asynchronies',
             'patient_by_patient_prvc_no_asynchronies.png',
             individual_patients,
@@ -1366,8 +1398,8 @@ class ResultsContainer(object):
 
         # PRVC only, asynchronies only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['prvc_only_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['prvc_only_async'][self.window_n],
+            windowing,
             'Patient by patient results. PRVC Asynchronies only',
             'patient_by_patient_prvc_asynchronies_only.png',
             individual_patients,
@@ -1376,8 +1408,8 @@ class ResultsContainer(object):
 
         # no efforting only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['no_efforting'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['no_efforting'][self.window_n],
+            windowing,
             'Patient by patient results. No Apparent Efforting',
             'patient_by_patient_no_efforting.png',
             individual_patients,
@@ -1386,8 +1418,8 @@ class ResultsContainer(object):
 
         # early efforting only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['early_efforting'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['early_efforting'][self.window_n],
+            windowing,
             'Patient by patient results. Early Efforting',
             'patient_by_patient_early_efforting.png',
             individual_patients,
@@ -1396,8 +1428,8 @@ class ResultsContainer(object):
 
         # insp efforting only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['insp_efforting'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['insp_efforting'][self.window_n],
+            windowing,
             'Patient by patient results. Inspiratory Efforting',
             'patient_by_patient_insp_efforting.png',
             individual_patients,
@@ -1406,8 +1438,8 @@ class ResultsContainer(object):
 
         # exp efforting only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['exp_efforting'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['exp_efforting'][self.window_n],
+            windowing,
             'Patient by patient results. Expiratory Efforting',
             'patient_by_patient_exp_efforting.png',
             individual_patients,
@@ -1416,8 +1448,8 @@ class ResultsContainer(object):
 
         # all efforting only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['all_efforting'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['all_efforting'][self.window_n],
+            windowing,
             'Patient by patient results. All Efforting',
             'patient_by_patient_all_efforting.png',
             individual_patients,
@@ -1426,8 +1458,8 @@ class ResultsContainer(object):
 
         # PC/PRVC only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['all_pressure_only'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['all_pressure_only'][self.window_n],
+            windowing,
             'Patient by patient results. PC/PRVC only',
             'patient_by_patient_pc_prvc_only.png',
             individual_patients,
@@ -1435,12 +1467,12 @@ class ResultsContainer(object):
         )
 
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['all_pressure_only'][self.wmd_n], algos_in_order, use_wmd, 'pressure_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['all_pressure_only'][self.window_n], algos_in_order, windowing, 'pressure_only_pbp')
 
         # Artifacts only
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['artifacts'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['artifacts'][self.window_n],
+            windowing,
             'Patient by patient results. Artifacts only',
             'patient_by_patient_artifacts_only.png',
             individual_patients,
@@ -1449,8 +1481,8 @@ class ResultsContainer(object):
 
         # group asynchronies/artifacts by mode
         mad_std, algos_in_order = self.plot_algo_scatter(
-            self.pp_frames['all_pressure_only_async'][self.wmd_n],
-            use_wmd,
+            self.pp_frames['all_pressure_only_async'][self.window_n],
+            windowing,
             'Patient by patient results. Pressure Mode Asynchronies only',
             'patient_by_patient_pressure_mode_asynchronies_only.png',
             individual_patients,
@@ -1476,16 +1508,16 @@ class ResultsContainer(object):
             self.results_dir.mkdir()
         pd.to_pickle(self, str(self.results_dir.joinpath('ResultsContainer.pkl')))
 
-    def set_new_wmd_n(self, wmd_n):
+    def set_new_window_n(self, window_n):
         """
-        Set a new number of samples for WMD.
+        Set a new number of samples for windows.
 
-        :param wmd_n: new length of WMD window
+        :param window_n: new length of WMD window
         """
-        self.wmd_n = wmd_n
+        self.window_n = window_n
         # make sure to only analyze results if we haven't previously done the
         # analysis for this window size before. Just use asynci as our canary
-        if not 'asynci_{}'.format(wmd_n) in self.proc_results.columns:
+        if not 'asynci_{}'.format(window_n) in self.proc_results.columns:
             self.analyze_results()
 
     def visualize_patient(self, patient, algos, extra_mask=None, ts_xlim=None, ts_ylim=None):
@@ -1493,28 +1525,32 @@ class ResultsContainer(object):
             algos = self.algos_used
         algo_cols = algos
         diff_cols = ['{}_diff'.format(c) for c in algo_cols]
-        wmd_cols = ['{}_wmd'.format(c) for c in algo_cols]
-        final_cols = algo_cols + diff_cols + wmd_cols + ['rel_bn', 'gold_stnd_compliance', 'patient_id']
+        wmd_cols = ['{}_wmd_{}'.format(c, self.window_n) for c in algo_cols]
+        smd_cols = ['{}_smd_{}'.format(c, self.window_n) for c in algo_cols]
+        final_cols = algo_cols + diff_cols + wmd_cols + smd_cols + ['rel_bn', 'gold_stnd_compliance', 'patient_id']
 
         if not isinstance(extra_mask, type(None)):
             patient_df = self.proc_results[(self.proc_results.patient == patient) & extra_mask][final_cols]
         else:
             patient_df = self.proc_results[self.proc_results.patient == patient][final_cols]
 
-        patient_df[['rel_bn']+algo_cols].plot(x='rel_bn', figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
+        # XXX alright this is rly weird.al-rawas is like 10-20 off on breath-by-breath,
+        # but then on scatter it is wayyy closer to the origin (0,0).
+        patient_df[algo_cols].plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
         plt.legend(fontsize=16)
         plt.title(patient, fontsize=20)
         if ts_xlim is not None:
             plt.xlim(ts_xlim)
         if ts_ylim is not None:
             plt.ylim(ts_ylim)
-        plt.plot(patient_df.rel_bn, patient_df.gold_stnd_compliance, label='gt')
+        plt.plot(patient_df.gold_stnd_compliance, label='gt')
+        plt.xlabel('DataFrame index')
         plt.show()
 
         pp_custom = self.analyze_per_patient_df(patient_df)
         mad_std, algos_in_order = self.plot_algo_scatter(
             pp_custom,
-            False,
+            None,
             'Patient {}. Custom plot'.format(patient),
             '{}_custom_plot.png'.format(patient),
             False,
