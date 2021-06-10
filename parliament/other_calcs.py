@@ -75,10 +75,12 @@ def al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol):
     vols = np.abs(calc_volumes(flow[x0_index:x0_index+end_idx], dt))
     x = np.abs(flow[x0_index+start_idx:x0_index+end_idx])
     regress = linregress(x, vols[start_idx:])
-    # XXX I'm still unsure about some questions I had between the al-rawas paper
-    # and my own implementation. especially for the first linregress check
     if np.abs(regress.rvalue) < linregress_tol:
         return np.nan
+    # I've tried different ways: 1 with x as the independent var and vols/x as target.
+    # Then with flow as independent and vols as target. The one with just x as independent
+    # worked the best here. This is also the method that al-rawas explains in his
+    # paper as well.
     return linregress(np.arange(len(x)), vols[start_idx:]/x).slope
 
 
@@ -109,9 +111,12 @@ def al_rawas_calcs(flow, vols, pressure, x0_index, dt, pip, peep, tvi, complianc
         return np.nan, np.nan, np.nan, np.nan
     if tau is None:
         tau = al_rawas_expiratory_const(flow, x0_index, dt, linregress_tol)
+    # (tvi + tau + flow_rate) / (peak pressure during inhalation - PEEP)
+    # It's important to note in a latter letter that al-rawas states that flow
+    # needs to be taken from the inhalation of the breath
     compliance_curve = [
-        (vol + tau * flow[i]) / (max(pressure[:i+1]) - peep)
-        for i, vol in enumerate(vols[:x0_index-1])
+        (tvi + tau * f) / (max(pressure[:x0_index]) - peep)
+        for i, f in enumerate(flow[:x0_index])
     ]
     if compliance_idx == 'max':
         compliance = max(compliance_curve)
@@ -121,6 +126,8 @@ def al_rawas_calcs(flow, vols, pressure, x0_index, dt, pip, peep, tvi, complianc
         compliance = np.median(compliance_curve)
     elif isinstance(compliance_idx, int):
         compliance = compliance_curve[compliance_idx]
+    # resistance and plat are just derived using standard equations, and not al-rawas
+    # derivations
     resistance = tau / compliance
     plat = tvi * (1 / compliance) + peep
     return round(tau, 4), round(plat, 2), round(compliance, 4), round(resistance, 2)
@@ -265,7 +272,7 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
     p_new = np.array(pressure[start_idx:])
     p_new = p_new - p_new[0]
     a = np.array([vols, f_new]).transpose()
-    least_square_result = np.linalg.lstsq(a, np.array(p_new)-peep)
+    least_square_result = np.linalg.lstsq(a, np.array(p_new))
     solution = least_square_result[0]
     elastance = solution[0]
     plat = tvi * elastance + peep
