@@ -43,6 +43,17 @@ def rolling_nan_mean(vals, win_size):
     return _rolling_func(vals, win_size, np.nanmean)
 
 
+def sequential_nan_median(vals, win_size):
+    strides = view_as_windows(vals, (win_size,), step=win_size)
+    meds = np.nanmedian(strides, axis=1)
+    # these next 2 lines fill in nans between sequence val and next sequence val
+    tmp = np.expand_dims(meds[:-1], axis=0)
+    tmp = np.pad(tmp.T, ((0, 0), (0, win_size-1)), constant_values=np.nan).ravel()
+    tmp = np.append(tmp, [meds[-1]])
+    # this line makes sure any remaining nans are filled.
+    return np.pad(tmp, (win_size-1, len(vals)-(len(tmp)+win_size-1)), constant_values=np.nan)
+
+
 class ResultsContainer(object):
 
     def __init__(self, experiment_name, window_n):
@@ -561,13 +572,7 @@ class ResultsContainer(object):
 
         for patiend_id, pt_df in df.groupby('patient_id'):
             for algo in self.algos_used:
-                # reshape for strides.
-                strides = view_as_windows(pt_df[algo].values, (self.window_n,), step=self.window_n)
-                len_medians = strides.shape[0]
-                tmp = np.nanmedian(strides, axis=1)
-                tmp = np.expand_dims(tmp, axis=0)
-                tmp = np.pad(tmp.T, (0, self.window_n-1), constant_values=np.nan)[:len_medians].ravel()
-                tmp = np.pad(tmp, (0, len(pt_df)-len(tmp)), constant_values=np.nan)
+                tmp = sequential_nan_median(pt_df[algo].values, self.window_n)
                 df.loc[pt_df.index, '{}_sm_{}'.format(algo, self.window_n)] = tmp
 
         for algo in self.algos_used:

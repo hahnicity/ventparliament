@@ -1,7 +1,7 @@
 from nose.tools import eq_
 import numpy as np
 
-from parliament.main import ResultsContainer, rolling_nan_mean, rolling_nan_median
+from parliament.main import ResultsContainer, rolling_nan_mean, rolling_nan_median, sequential_nan_median
 
 
 def test_rolling_nan_median_win2():
@@ -25,6 +25,24 @@ def test_rolling_nan_mean_win3():
     assert (out[2:] == np.array([3, 6, 4, 6])).all(), out[2:]
     assert np.isnan(out[0])
     assert np.isnan(out[1])
+
+
+def test_sequential_nan_median_win3():
+    vals = np.array([2, 2, 5, 11, -4, 11])
+    out = sequential_nan_median(vals, 3)
+    assert (out[~np.isnan(out)] == np.array([2, 11])).all(), out[~np.isnan(out)]
+    nan_idxs = [0, 1, 3, 4]
+    for idx in nan_idxs:
+        assert np.isnan(out[idx]), out
+
+
+def test_sequential_nan_median_win4():
+    vals = np.array([2, 2, 5, 11, -4, 11])
+    out = sequential_nan_median(vals, 4)
+    assert (out[~np.isnan(out)] == np.array([3.5])).all(), out[~np.isnan(out)]
+    nan_idxs = [0, 1, 2, 4, 5]
+    for idx in nan_idxs:
+        assert np.isnan(out[idx]), out
 
 
 class TestResultsContainer(object):
