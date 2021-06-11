@@ -1,6 +1,8 @@
 """
 main
 ~~~~
+
+Main analysis code
 """
 import argparse
 from copy import copy
@@ -25,6 +27,20 @@ import seaborn as sns
 from skimage.util.shape import view_as_windows
 
 from parliament.analyze import FileCalculations
+
+
+def _rolling_func(vals, win_size, func):
+    strides = view_as_windows(vals, (win_size,), step=1)
+    tmp = func(strides, axis=1)
+    return np.append([np.nan]*(win_size-1), tmp)
+
+
+def rolling_nan_median(vals, win_size):
+    return _rolling_func(vals, win_size, np.nanmedian)
+
+
+def rolling_nan_mean(vals, win_size):
+    return _rolling_func(vals, win_size, np.nanmean)
 
 
 class ResultsContainer(object):
@@ -526,8 +542,11 @@ class ResultsContainer(object):
         """
         for patiend_id, pt_df in df.groupby('patient_id'):
             for algo in self.algos_used:
-                df.loc[pt_df.index, '{}_wm_{}'.format(algo, self.window_n)] = pt_df[algo].rolling(self.window_n, min_periods=self.window_n).apply(lambda x: np.nanmedian(x))
-            df.loc[pt_df.index, 'dtw_wm_{}'.format(self.window_n)] = pt_df['dtw'].rolling(self.window_n, min_periods=self.window_n).apply(lambda x: np.nanmedian(x))
+                # found a bug in rolling where if there are any nans within the
+                # step size, then the rolling window automatically returns nan.
+                # so instead, we have to perform a custom rolling script
+                df.loc[pt_df.index, '{}_wm_{}'.format(algo, self.window_n)] = rolling_nan_median(pt_df[algo].values, self.window_n)
+            df.loc[pt_df.index, 'dtw_wm_{}'.format(self.window_n)] = rolling_nan_median(pt_df['dtw'].values, self.window_n)
 
         for algo in self.algos_used:
             wm_colname = '{}_wm_{}'.format(algo, self.window_n)
@@ -608,8 +627,7 @@ class ResultsContainer(object):
                 # it def. introduces some inaccuracy in the index vals because
                 # they may be artificially higher than what they would be normally
                 final_index_col = '{}_{}'.format(index_col, self.window_n)
-                df.loc[pt_df.index, final_index_col] = pt_df[async_cols].any(axis=1).astype(int).\
-                    rolling(self.window_n, min_periods=self.window_n).apply(lambda x: np.nanmean(x))
+                df.loc[pt_df.index, final_index_col] = rolling_nan_mean(pt_df[async_cols].any(axis=1).astype(int).values, self.window_n)
 
     def collate_data(self, algos_used):
         """
@@ -636,8 +654,8 @@ class ResultsContainer(object):
                 inf_idxs = df[(df[algo] == np.inf) | (df[algo] == -np.inf)].index
                 df.loc[inf_idxs, algo] = np.nan
                 self.proc_results.loc[inf_idxs, algo] = np.nan
-                # I've found that mean can blow up in the presence of outliers. So instead use
-                # the median
+                # I've found that mean can blow up in the presence of outliers.
+                # So instead use the median
                 algo_median = df[algo].median(skipna=True)
                 algo_mad = median_absolute_deviation(df[algo].values, nan_policy='omit')
                 # multiply the algo mad by 30 because std can be so ridiculous that it
