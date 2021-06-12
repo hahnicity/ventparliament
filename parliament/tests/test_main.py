@@ -46,14 +46,11 @@ def test_sequential_nan_median_win4():
 
 
 class TestResultsContainer(object):
-    def __init__(self):
-        pass
-
     def setup(self):
         self.test_con = ResultsContainer.load_from_experiment_name('testing_base')
         self.test_con.window_n = 2
 
-    def test_calc_windows(self):
+    def test_calc_windows_wm(self):
         self.test_con.calc_windows(self.test_con.proc_results)
         r = self.test_con.proc_results
         # sanity checks
@@ -70,6 +67,13 @@ class TestResultsContainer(object):
                     else:
                         eq_(pt_df.iloc[i][algo + '_wm_2'], out)
 
+    def test_calc_windows_dtw_wm(self):
+        self.test_con.calc_windows(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        # sanity checks
+        assert (r.gold_stnd_compliance ==  [50]*5+[20]*5).all()
+        assert self.test_con.window_n == 2
+
         for pt, pt_df in r.groupby('patient_id'):
             assert np.isnan(pt_df.iloc[0]['dtw_wm_2'])
             for i in range(1, 5):
@@ -79,6 +83,12 @@ class TestResultsContainer(object):
                 else:
                     eq_(pt_df.iloc[i]['dtw_wm_2'], out)
 
+    def test_calc_windows_dtw_wmd(self):
+        self.test_con.calc_windows(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        # sanity checks
+        assert (r.gold_stnd_compliance ==  [50]*5+[20]*5).all()
+        assert self.test_con.window_n == 2
         for algo in self.test_con.algos_used:
             for pt, pt_df in r.groupby('patient_id'):
                 assert np.isnan(pt_df.iloc[0][algo + '_wmd_2'])
@@ -90,4 +100,84 @@ class TestResultsContainer(object):
                     else:
                         eq_(pt_df.iloc[i][algo + '_wmd_2'], gold-out)
 
-        # XXX need to do sm/smd
+    def test_calc_windows_dtw_sm(self):
+        self.test_con.calc_windows(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        # sanity checks
+        assert (r.gold_stnd_compliance ==  [50]*5+[20]*5).all()
+        assert self.test_con.window_n == 2
+        for algo in self.test_con.algos_used:
+            for pt, pt_df in r.groupby('patient_id'):
+                out1 = np.nanmedian(pt_df.iloc[0:2][algo])
+                out2 = np.nanmedian(pt_df.iloc[2:4][algo])
+                for idx, o in [(1, out1), (3, out2)]:
+                    if np.isnan(o):
+                        assert np.isnan(pt_df.iloc[idx][algo + '_sm_2'])
+                    else:
+                        eq_(o, pt_df.iloc[idx][algo + '_sm_2'])
+                nan_idxs = [0, 2, 4]
+                for idx in nan_idxs:
+                    assert np.isnan(pt_df.iloc[idx][algo + '_sm_2']), out
+
+    def test_calc_windows_dtw_smd(self):
+        self.test_con.calc_windows(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        # sanity checks
+        assert (r.gold_stnd_compliance ==  [50]*5+[20]*5).all()
+        assert self.test_con.window_n == 2
+        for algo in self.test_con.algos_used:
+            for pt, pt_df in r.groupby('patient_id'):
+                out1 = pt_df.iloc[0].gold_stnd_compliance - np.nanmedian(pt_df.iloc[0:2][algo])
+                out2 = pt_df.iloc[0].gold_stnd_compliance - np.nanmedian(pt_df.iloc[2:4][algo])
+                for idx, o in [(1, out1), (3, out2)]:
+                    if np.isnan(o):
+                        assert np.isnan(pt_df.iloc[idx][algo + '_smd_2'])
+                    else:
+                        eq_(o, pt_df.iloc[idx][algo + '_smd_2'])
+                nan_idxs = [0, 2, 4]
+                for idx in nan_idxs:
+                    assert np.isnan(pt_df.iloc[idx][algo + '_smd_2']), out
+
+    def test_calc_async_index_preprocessing_assertions(self):
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        dtas = r.loc[r.dta > 0, 'dta'].values
+        assert (dtas < 2).all()
+        assert len(dtas[dtas>0]) == 2  # I manually set 2 breaths to be dta
+        assert not (np.isnan(r.insp_efforting.values)).any()
+        assert (r.loc[r.fa == 1, 'fa_mild'] == 1).values.all()
+        assert (r.loc[r.fa == 2, 'fa_mod'] == 1).values.all()
+        assert (r.loc[r.fa == 3, 'fa_sev'] == 1).values.all()
+        assert (r.loc[r.fa == 2, 'fa_mild'] != 1).values.all()
+        assert (r.loc[r.fa == 3, 'fa_mild'] != 1).values.all()
+        assert (r.loc[r.fa == 1, 'fa_mod'] != 1).values.all()
+        assert (r.loc[r.fa == 3, 'fa_mod'] != 1).values.all()
+        assert (r.loc[r.fa == 1, 'fa_sev'] != 1).values.all()
+        assert (r.loc[r.fa == 2, 'fa_sev'] != 1).values.all()
+        assert len(r.loc[r.fa_mild == 1].values) == 3
+        assert len(r.loc[r.fa_mod == 1].values) == 1
+        assert len(r.loc[r.fa_sev == 1].values) == 1
+
+    def test_calc_async_index_asynci(self):
+        pass
+
+    def test_calc_async_index_asynci_no_fam(self):
+        pass
+
+    def test_calc_async_index_bsi(self):
+        pass
+
+    def test_calc_async_index_dci(self):
+        pass
+
+    def test_calc_async_index_dti(self):
+        pass
+
+    def test_calc_async_index_fai(self):
+        pass
+
+    def test_calc_async_index_fai_no_fam(self):
+        pass
+
+    def test_calc_async_index_insp_effi(self):
+        pass
