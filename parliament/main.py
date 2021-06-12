@@ -438,12 +438,16 @@ class ResultsContainer(object):
             algos_in_frame = set(df.columns).intersection(self.algos_used)
             for algo in algos_in_frame:
                 row = [patient_id, algo]
+                # pandas divides std by n-1, and numpy divides by n. We really
+                # should be dividing by n here, so thats why we use np.nanstd instead
+                # of using DataFrame.std(skipna=True). Also we weren't using skipna
+                # originally, which was a big error
                 row.append(np.nanmedian(frame['{}_diff'.format(algo, self.window_n)].abs()))
-                row.append(frame[algo].std())
+                row.append(np.nanstd(frame[algo]))
                 row.append(np.nanmedian(frame['{}_wmd_{}'.format(algo, self.window_n)].abs()))
-                row.append(frame['{}_wmd_{}'.format(algo, self.window_n)].std())
+                row.append(np.nanstd(frame['{}_wmd_{}'.format(algo, self.window_n)]))
                 row.append(np.nanmedian(frame['{}_smd_{}'.format(algo, self.window_n)].abs()))
-                row.append(frame['{}_smd_{}'.format(algo, self.window_n)].std())
+                row.append(np.nanstd(frame['{}_smd_{}'.format(algo, self.window_n)]))
                 row_results.append(row)
         cols = ['patient_id', 'algo', 'mad_pt', 'std_pt', 'mad_wmd', 'std_wmd', 'mad_smd', 'std_smd']
         return pd.DataFrame(row_results, columns=cols)
@@ -975,31 +979,25 @@ class ResultsContainer(object):
         }
 
     def preprocess_mad_std_in_df(self, df, windowing):
-        # Do scatter of MAD by std
-        algos_in_frame = sorted(list(df.algo.unique()))
-        mad_std = {algo: [[], [], None, None, None] for algo in algos_in_frame}
-        algo_dists = []
+        # this function is really not necessary. But its here, and it does save on
+        # some complexity of computing things in the graphing function itself, like
+        # performing some nan filtering and doing dataset slicing
+        algos = sorted(list(df.algo.unique()))
+        mad_std = {algo: [[], [], None, None] for algo in algos}
         mad_col, std_col = self._get_windowing_colnames(windowing)
 
-        for algo in algos_in_frame:
-            # mad on x axis, std on y
-            mad_std[algo][0] = df[df.algo == algo][mad_col]
-            if np.isnan(mad_std[algo][0]).all():
+        for algo in algos:
+            nan_mask = df[df.algo==algo][mad_col].isna()
+            if nan_mask.values.all():
                 del mad_std[algo]
                 continue
-            mad_std[algo][1] = df[df.algo == algo][std_col]
-            mean_mad = np.nanmean(mad_std[algo][0])
-            mean_std = np.nanmean(mad_std[algo][1])
-            mad_std[algo][2] = mean_mad
-            mad_std[algo][3] = mean_std
-            # l1 distance to origin (0, 0). uses l1 because l2 places higher emphasis on std
-            mad_std[algo][4] = mean_mad+mean_std
-            algo_dists.append(mean_mad+mean_std)
+            non_nan = df[df.algo==algo][~nan_mask]
+            mad_std[algo][0] = non_nan[mad_col]
+            mad_std[algo][1] = non_nan[std_col]
+            mad_std[algo][2] = np.mean(mad_std[algo][0])
+            mad_std[algo][3] = np.mean(mad_std[algo][1])
 
-        algos_used = [algo for algo in copy(algos_in_frame) if algo in mad_std]
-        # sort by alphabetical order
-        algos_in_order = sorted(algos_used)
-        return mad_std, algos_in_order
+        return mad_std, algos
 
     def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim):
         """
@@ -1007,7 +1005,6 @@ class ResultsContainer(object):
 
         X-axis is MAD and Y-axis is std.
         """
-        algos_in_frame = sorted(list(df.algo.unique()))
         mad_std, algos_in_order = self.preprocess_mad_std_in_df(df, windowing)
         return self._mad_std_scatter(mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim)
 
