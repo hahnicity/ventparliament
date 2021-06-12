@@ -141,6 +141,20 @@ class ResultsContainer(object):
         td.insert(0, soup.new_tag('b'))
         td.b.string = val
 
+    def _get_windowing_colnames(self, windowing):
+        if windowing is None:
+            mad_col = 'mad_pt'
+            std_col = 'std_pt'
+        elif windowing == 'wmd':
+            mad_col = 'mad_wmd'
+            std_col = 'std_wmd'
+        elif windowing == 'smd':
+            mad_col = 'mad_smd'
+            std_col = 'std_smd'
+        else:
+            raise ValueError('windowing variable must be None, "wmd", or "smd"')
+        return mad_col, std_col
+
     def _mad_std_scatter(self, mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim):
         """
         Perform scatter plot using with MAD and std information for each algorithm.
@@ -446,8 +460,6 @@ class ResultsContainer(object):
             warn('Called analyze_results before any results were collated. Call collate_data first!')
             return
 
-        for algo in self.algos_used:
-            self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
         self.calc_windows(self.proc_results)
         self.calc_async_index(self.proc_results)
 
@@ -550,7 +562,11 @@ class ResultsContainer(object):
         median deviation (SMD).
 
         Note: WM = window median
+              SM = sequential median
         """
+        for algo in self.algos_used:
+            self.proc_results['{}_diff'.format(algo)] = self.proc_results['gold_stnd_compliance'] - self.proc_results[algo]
+
         for patiend_id, pt_df in df.groupby('patient_id'):
             for algo in self.algos_used:
                 # found a bug in rolling where if there are any nans within the
@@ -963,17 +979,7 @@ class ResultsContainer(object):
         algos_in_frame = sorted(list(df.algo.unique()))
         mad_std = {algo: [[], [], None, None, None] for algo in algos_in_frame}
         algo_dists = []
-        if windowing is None:
-            mad_col = 'mad_pt'
-            std_col = 'std_pt'
-        elif windowing == 'wmd':
-            mad_col = 'mad_wmd'
-            std_col = 'std_wmd'
-        elif windowing == 'smd':
-            mad_col = 'mad_smd'
-            std_col = 'std_smd'
-        else:
-            raise ValueError('windowing variable must be None, "wmd", or "smd"')
+        mad_col, std_col = self._get_windowing_colnames(windowing)
 
         for algo in algos_in_frame:
             # mad on x axis, std on y
@@ -1008,15 +1014,7 @@ class ResultsContainer(object):
     def plot_algo_mad_std_boxplots(self, df, algo_ordering, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         # you can use bootstrap too if you want, but for now I'm not going to
-        if windowing is None:
-            mad_col = 'mad_pt'
-            std_col = 'std_pt'
-        elif windowing == 'wmd':
-            mad_col = 'mad_wmd'
-            std_col = 'std_wmd'
-        elif windowing == 'smd':
-            mad_col = 'mad_smd'
-            std_col = 'std_smd'
+        mad_col, std_col = self._get_windowing_colnames(windowing)
 
         sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
         ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
@@ -1551,8 +1549,6 @@ class ResultsContainer(object):
         else:
             patient_df = self.proc_results[self.proc_results.patient == patient][final_cols]
 
-        # XXX alright this is rly weird.al-rawas is like 10-20 off on breath-by-breath,
-        # but then on scatter it is wayyy closer to the origin (0,0).
         patient_df[algo_cols].plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
         plt.legend(fontsize=16)
         plt.title(patient, fontsize=20)

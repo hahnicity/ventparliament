@@ -1,4 +1,4 @@
-from nose.tools import eq_
+from nose.tools import assert_list_equal, eq_
 import numpy as np
 
 from parliament.main import ResultsContainer, rolling_nan_mean, rolling_nan_median, sequential_nan_median
@@ -49,6 +49,24 @@ class TestResultsContainer(object):
     def setup(self):
         self.test_con = ResultsContainer.load_from_experiment_name('testing_base')
         self.test_con.window_n = 2
+
+    def test_calc_windows_diff(self):
+        self.test_con.calc_windows(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        # sanity checks
+        assert (r.gold_stnd_compliance ==  [50]*5+[20]*5).all()
+        assert self.test_con.window_n == 2
+
+        for algo in self.test_con.algos_used:
+            for pt, pt_df in r.groupby('patient_id'):
+                mask = np.isnan(pt_df[algo].values)
+                if mask.any():
+                    assert np.isnan(pt_df[algo+'_diff'][mask]).all()
+
+                if pt == '0210RPI05':
+                    assert_list_equal(list(pt_df[algo + '_diff'][~mask]), list(50 - pt_df[algo][~mask]))
+                elif pt == '0640RPI28':
+                    assert_list_equal(list(pt_df[algo + '_diff'][~mask]), list(20 - pt_df[algo][~mask]))
 
     def test_calc_windows_wm(self):
         self.test_con.calc_windows(self.test_con.proc_results)
@@ -272,7 +290,7 @@ class TestResultsContainer(object):
         for pt, pt_df in r.groupby('patient_id'):
             assert np.isnan(pt_df.iloc[0]['fai_no_fam_2'])
             # do manual check because it provides additional safety against function
-            # fai_no_famlure
+            # failure
             if pt == '0210RPI05':
                 assert pt_df.iloc[1]['fai_no_fam_2'] == 0.5
                 assert pt_df.iloc[2]['fai_no_fam_2'] == 1.0
@@ -290,7 +308,7 @@ class TestResultsContainer(object):
         for pt, pt_df in r.groupby('patient_id'):
             assert np.isnan(pt_df.iloc[0]['insp_effi_2'])
             # do manual check because it provides additional safety against function
-            # insp_effilure
+            # failure
             if pt == '0210RPI05':
                 assert pt_df.iloc[1]['insp_effi_2'] == 1.0
                 assert pt_df.iloc[2]['insp_effi_2'] == 1.0
@@ -301,3 +319,9 @@ class TestResultsContainer(object):
                 assert pt_df.iloc[2]['insp_effi_2'] == 0.0
                 assert pt_df.iloc[3]['insp_effi_2'] == 0.0
                 assert pt_df.iloc[4]['insp_effi_2'] == 0.0
+
+    def test_analyze_per_patient_df(self):
+        pass
+
+    def test_preprocess_mad_std_in_df(self):
+        pass
