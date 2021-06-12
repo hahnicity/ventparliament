@@ -154,12 +154,27 @@ class TestResultsContainer(object):
         assert (r.loc[r.fa == 3, 'fa_mod'] != 1).values.all()
         assert (r.loc[r.fa == 1, 'fa_sev'] != 1).values.all()
         assert (r.loc[r.fa == 2, 'fa_sev'] != 1).values.all()
-        assert len(r.loc[r.fa_mild == 1].values) == 3
+        assert len(r.loc[r.fa_mild == 1].values) == 2
         assert len(r.loc[r.fa_mod == 1].values) == 1
         assert len(r.loc[r.fa_sev == 1].values) == 1
 
     def test_calc_async_index_asynci(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['asynci_2'])
+            # do manual check because it provides additional safety against function
+            # failure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['asynci_2'] == 1.0
+                assert pt_df.iloc[2]['asynci_2'] == 1.0
+                assert pt_df.iloc[3]['asynci_2'] == 1.0
+                assert pt_df.iloc[4]['asynci_2'] == 0.5
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['asynci_2'] == 1.0
+                assert pt_df.iloc[2]['asynci_2'] == 1.0
+                assert pt_df.iloc[3]['asynci_2'] == 1.0
+                assert pt_df.iloc[4]['asynci_2'] == 0.5
 
     def test_calc_async_index_asynci_no_fam(self):
         pass
