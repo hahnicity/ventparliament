@@ -997,7 +997,7 @@ class ResultsContainer(object):
             mad_std[algo][2] = np.mean(mad_std[algo][0])
             mad_std[algo][3] = np.mean(mad_std[algo][1])
 
-        return mad_std, algos
+        return mad_std, sorted(list(mad_std.keys()))
 
     def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim):
         """
