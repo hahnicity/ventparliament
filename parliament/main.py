@@ -625,12 +625,6 @@ class ResultsContainer(object):
         ]
         for patiend_id, pt_df in df.groupby('patient_id'):
             for index_col, async_cols in index_to_async_mapping:
-                # this works out decently for multi-col because the first sum
-                # operation compresses the columns. The downside is that because
-                # we didnt integrate DCA/FA into TOR we can have multiple asyncs
-                # in one breath. For now I dont know if this is a huge deal but
-                # it def. introduces some inaccuracy in the index vals because
-                # they may be artificially higher than what they would be normally
                 final_index_col = '{}_{}'.format(index_col, self.window_n)
                 df.loc[pt_df.index, final_index_col] = rolling_nan_mean(pt_df[async_cols].any(axis=1).astype(int).values, self.window_n)
 

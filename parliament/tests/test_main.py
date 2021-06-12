@@ -177,22 +177,127 @@ class TestResultsContainer(object):
                 assert pt_df.iloc[4]['asynci_2'] == 0.5
 
     def test_calc_async_index_asynci_no_fam(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['asynci_no_fam_2'])
+            # do manual check because it provides additional safety against function
+            # failure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['asynci_no_fam_2'] == 1.0
+                assert pt_df.iloc[2]['asynci_no_fam_2'] == 1.0
+                assert pt_df.iloc[3]['asynci_no_fam_2'] == 0.5
+                assert pt_df.iloc[4]['asynci_no_fam_2'] == 0.0
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['asynci_no_fam_2'] == 1.0
+                assert pt_df.iloc[2]['asynci_no_fam_2'] == 1.0
+                assert pt_df.iloc[3]['asynci_no_fam_2'] == 1.0
+                assert pt_df.iloc[4]['asynci_no_fam_2'] == 0.5
 
     def test_calc_async_index_bsi(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['bsi_2'])
+            # do manual check because it provides additional safety against function
+            # failure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['bsi_2'] == 0.5
+                assert pt_df.iloc[2]['bsi_2'] == 0.5
+                assert pt_df.iloc[3]['bsi_2'] == 0.5
+                assert pt_df.iloc[4]['bsi_2'] == 0.0
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['bsi_2'] == 0.0
+                assert pt_df.iloc[2]['bsi_2'] == 0.0
+                assert pt_df.iloc[3]['bsi_2'] == 0.0
+                assert pt_df.iloc[4]['bsi_2'] == 0.0
 
     def test_calc_async_index_dci(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['dci_2'])
+            # do manual check because it provides additional safety against function
+            # failure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['dci_2'] == 0.0
+                assert pt_df.iloc[2]['dci_2'] == 0.0
+                assert pt_df.iloc[3]['dci_2'] == 0.0
+                assert pt_df.iloc[4]['dci_2'] == 0.0
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['dci_2'] == 1.0
+                assert pt_df.iloc[2]['dci_2'] == 1.0
+                assert pt_df.iloc[3]['dci_2'] == 1.0
+                assert pt_df.iloc[4]['dci_2'] == 0.5
 
     def test_calc_async_index_dti(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['dti_2'])
+            # do manual check because it provides additional safety against function
+            # failure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['dti_2'] == 1.0
+                assert pt_df.iloc[2]['dti_2'] == 0.5
+                assert pt_df.iloc[3]['dti_2'] == 0.0
+                assert pt_df.iloc[4]['dti_2'] == 0.0
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['dti_2'] == 0.0
+                assert pt_df.iloc[2]['dti_2'] == 0.0
+                assert pt_df.iloc[3]['dti_2'] == 0.0
+                assert pt_df.iloc[4]['dti_2'] == 0.0
 
     def test_calc_async_index_fai(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['fai_2'])
+            # do manual check because it provides additional safety against function
+            # failure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['fai_2'] == 1.0
+                assert pt_df.iloc[2]['fai_2'] == 1.0
+                assert pt_df.iloc[3]['fai_2'] == 1.0
+                assert pt_df.iloc[4]['fai_2'] == 0.5
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['fai_2'] == 0.0
+                assert pt_df.iloc[2]['fai_2'] == 0.0
+                assert pt_df.iloc[3]['fai_2'] == 0.0
+                assert pt_df.iloc[4]['fai_2'] == 0.0
 
     def test_calc_async_index_fai_no_fam(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['fai_no_fam_2'])
+            # do manual check because it provides additional safety against function
+            # fai_no_famlure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['fai_no_fam_2'] == 0.5
+                assert pt_df.iloc[2]['fai_no_fam_2'] == 1.0
+                assert pt_df.iloc[3]['fai_no_fam_2'] == 0.5
+                assert pt_df.iloc[4]['fai_no_fam_2'] == 0.0
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['fai_no_fam_2'] == 0.0
+                assert pt_df.iloc[2]['fai_no_fam_2'] == 0.0
+                assert pt_df.iloc[3]['fai_no_fam_2'] == 0.0
+                assert pt_df.iloc[4]['fai_no_fam_2'] == 0.0
 
     def test_calc_async_index_insp_effi(self):
-        pass
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        for pt, pt_df in r.groupby('patient_id'):
+            assert np.isnan(pt_df.iloc[0]['insp_effi_2'])
+            # do manual check because it provides additional safety against function
+            # insp_effilure
+            if pt == '0210RPI05':
+                assert pt_df.iloc[1]['insp_effi_2'] == 1.0
+                assert pt_df.iloc[2]['insp_effi_2'] == 1.0
+                assert pt_df.iloc[3]['insp_effi_2'] == 1.0
+                assert pt_df.iloc[4]['insp_effi_2'] == 1.0
+            elif pt == '0640RPI28':
+                assert pt_df.iloc[1]['insp_effi_2'] == 0.0
+                assert pt_df.iloc[2]['insp_effi_2'] == 0.0
+                assert pt_df.iloc[3]['insp_effi_2'] == 0.0
+                assert pt_df.iloc[4]['insp_effi_2'] == 0.0
