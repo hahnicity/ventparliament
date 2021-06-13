@@ -487,3 +487,34 @@ class TestResultsContainer(object):
         assert (mad_std['iipr'][3]==np.nanmean(stds))
         stds = pp_all[pp_all.algo == 'vicario_nieap']['std_smd']
         assert (mad_std['vicario_nieap'][3]==np.nanmean(stds))
+
+    def test_extract_medians_and_iqr_median(self):
+        self.test_con.boot_resamples = 0
+        self.test_con.calc_windows(self.test_con.proc_results)
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        diff_cols = sorted(['{}_diff'.format(algo) for algo in self.test_con.algos_used])
+        proc_frame = self.test_con.extract_medians_and_iqr(r)
+        medians = np.nanmedian(r[diff_cols], axis=0)
+        assert (proc_frame['medians'] == medians).all()
+
+    def test_extract_medians_and_iqr_std(self):
+        self.test_con.boot_resamples = 0
+        self.test_con.calc_windows(self.test_con.proc_results)
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        diff_cols = sorted(['{}_diff'.format(algo) for algo in self.test_con.algos_used])
+        proc_frame = self.test_con.extract_medians_and_iqr(r)
+        stds = np.nanstd(r[diff_cols], axis=0)
+        assert (proc_frame.stds == stds).all()
+
+    def test_extract_medians_and_iqr_iqr(self):
+        self.test_con.boot_resamples = 0
+        self.test_con.calc_windows(self.test_con.proc_results)
+        self.test_con.calc_async_index(self.test_con.proc_results)
+        r = self.test_con.proc_results
+        diff_cols = sorted(['{}_diff'.format(algo) for algo in self.test_con.algos_used])
+        proc_frame = self.test_con.extract_medians_and_iqr(r)
+        iipr_iqr = np.nanpercentile(r['iipr_diff'], (25, 75))
+        vic_iqr = np.nanpercentile(r['vicario_nieap_diff'], (25, 75))
+        assert (np.array([iipr_iqr, vic_iqr])==proc_frame[['iqr_low', 'iqr_high']].values).all()

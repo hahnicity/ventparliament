@@ -43,6 +43,7 @@ def rolling_nan_mean(vals, win_size):
 
 
 def sequential_nan_median(vals, win_size):
+    # create strides as columns. Then compute median for each stride. Is quite time efficient.
     strides = view_as_windows(vals, (win_size,), step=win_size)
     meds = np.nanmedian(strides, axis=1)
     # these next 2 lines fill in nans between sequence val and next sequence val
@@ -125,13 +126,20 @@ class ResultsContainer(object):
         M = len(col_vals)
         percentiles = (25, 75)
 
-        bs_index = np.random.randint(M, size=(self.boot_resamples, M))
-        bsData = col_vals[bs_index]
-        estimate = np.nanmedian(bsData, axis=1, overwrite_input=True)
+        if self.boot_resamples >= 1:
+            boot_index = np.random.randint(M, size=(self.boot_resamples, M))
+            boot_data = col_vals[boot_index]
+        else:  # for testing circumstances. the repeat is to simulate a bootstrap
+            boot_data = col_vals[np.expand_dims(np.arange(M), axis=0).repeat(2, axis=0)]
 
-        # this is basically the same thing that scipy.stats.iqr does
-        iqr = np.median(np.nanpercentile(bsData, percentiles, axis=1), axis=1)
-        return np.median(estimate), iqr
+        estimate = np.nanmedian(boot_data, axis=1)
+        # this is basically the same thing that scipy.stats.iqr does.
+        # Also we need to take a median of the IQR here because we are performing bootstrapping.
+        # axis=1 is used here because this is the axis with the actual data. axis=0 contains
+        # the N bootstraps. if you took over axis=0 then you would just be taking median
+        # across [breath 1 for N bootstraps, breath 2 for N bootstraps, .. etc]
+        iqr = np.median(np.nanpercentile(boot_data, percentiles, axis=1), axis=1)
+        return np.median(estimate), iqr[0], iqr[1]
 
     def _change_td_to_bold(self, soup, td):
         """
@@ -367,26 +375,26 @@ class ResultsContainer(object):
         tmp = self.analyze_per_patient_df(frame)
         self._set_new_frame(self.pp_frames, name, tmp)
 
-    def _show_breath_by_breath_algo_table(self, algos_in_order, medians, iqr, stds, title):
+    def _show_breath_by_breath_algo_table(self, df, title):
         """
         Show table of boxplot results for breath by breath analysis of algorithms.
         """
         table = PrettyTable()
         table.field_names = ['Algorithm', 'Shorthand Name', 'Median Diff', '25% IQR', '75% IQR', 'std']
-        medians = medians.round(2)
-        iqr = iqr.round(2)
-        stds = stds.round(2)
-        # XXX this seems pretty brittle actually. given that the algo is not linked with medians/iqr/ OR std
-        for i, algo in enumerate(algos_in_order):
+        medians = df.medians.round(2).values
+        iqr_low = df.iqr_low.round(2).values
+        iqr_high = df.iqr_high.round(2).values
+        stds = df.stds.round(2).values
+        for i, algo in enumerate(df.algo.values):
             if not np.isnan(medians[i]):
-                table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], iqr[i, 0], iqr[i, 1], stds[i]])
+                table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], iqr_low[i], iqr_high[i], stds[i]])
             else:
                 table.add_row([FileCalculations.algo_name_mapping[algo], algo, '-', '-', '-', '-'])
 
         soup = BeautifulSoup(table.get_html_string())
         min_median = np.nanargmin(abs(medians))
         # XXX in the future we should revisit this before publication
-        min_iqr_rel_to_0 = np.nanargmin(abs(iqr).sum(axis=1))
+        min_iqr_rel_to_0 = np.nanargmin(abs(np.array([iqr_low, iqr_high]).T).sum(axis=1))
         min_std = np.nanargmin(stds)
         # the +1 is because the header is embedded in a <tr> element
         min_med_elem = soup.find_all('tr')[min_median+1]
@@ -750,7 +758,7 @@ class ResultsContainer(object):
         df = df.rename(columns={'variable': 'algo'})
 
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
-        # XXX add WMD option
+        # XXX add windowing options
 
         # alphabetical order again
         algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
@@ -766,13 +774,11 @@ class ResultsContainer(object):
         ax.set_title(title, fontsize=20)
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
-        medians, iqr = self.extract_medians_and_iqr(orig_bb1[sorted_diff_cols])
-        stds = orig_bb1[sorted_diff_cols].std().values
-        self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, mask1_name)
+        proc_frame = self.extract_medians_and_iqr(orig_bb1)
+        self._show_breath_by_breath_algo_table(proc_frame, mask1_name)
 
-        medians, iqr = self.extract_medians_and_iqr(orig_bb2[sorted_diff_cols])
-        stds = orig_bb2[sorted_diff_cols].std().values
-        self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, mask2_name)
+        proc_frame = self.extract_medians_and_iqr(orig_bb2)
+        self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
         plt.show(fig)
 
     def compare_window_strategies(self, windowing1, windowing2, individual_patients=False, std_lim=None):
@@ -804,16 +810,21 @@ class ResultsContainer(object):
 
     def extract_medians_and_iqr(self, df):
         """
+        Extract median/IQR/std vals from a DataFrame for algorithm diffs. Is used in breath
+        by breath plotting and table outputs
+
+        :param df: should be a breath by breath DataFrame. Can have a mask applied if needed
         """
-        # XXX need to update this to return a dataframe with proper attachment of algos,
-        # medians, iqr, and std
-        medians = []
-        iqrs = []
-        for col in df.columns:
-            med, iqr = self._bootstrap(df[col].values)
-            iqrs.append(iqr)
-            medians.append(med)
-        return np.array(medians), np.array(iqrs)
+        algos_in_frame = set(df.columns).intersection(self.algos_used)
+        sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
+        frame = df[sorted_diff_cols]
+        rows = []
+        for col in frame.columns:
+            rows.append([col.replace('_diff', '')] + list(self._bootstrap(frame[col].values)))
+        proc = pd.DataFrame(rows, columns=['algo', 'medians', 'iqr_low', 'iqr_high'])
+        stds = frame.std(skipna=True, ddof=0).values
+        proc['stds'] = stds
+        return proc
 
     def extract_descriptive_statistics(self):
         """
@@ -1062,29 +1073,33 @@ class ResultsContainer(object):
 
     def show_individual_breath_by_breath_frame_results(self, df, figname):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
-        # XXX add WMD option
+        # XXX add windowing option
         algos_in_frame = set(df.columns).intersection(self.algos_used)
         sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
-        medians, iqr = self.extract_medians_and_iqr(df[sorted_diff_cols])
-        stds = df[sorted_diff_cols].std().values.round(5)
+        proc_frame = self.extract_medians_and_iqr(df)
 
         # alphabetical order again
-        algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
-        self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians, notch=False, bootstrap=self.boot_resamples, palette=[self.algo_colors[algo] for algo in algos_in_order])
+        algos_in_order = sorted(list(proc_frame.algo.unique()))
+        self._draw_seaborn_boxplot_with_bootstrap(
+            df[sorted_diff_cols],
+            ax,
+            proc_frame.medians.values,
+            notch=False,
+            bootstrap=self.boot_resamples,
+            palette=[self.algo_colors[algo] for algo in algos_in_order]
+        )
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
         plt.setp(xtick_names, rotation=60, fontsize=14)
         xlim = ax.get_xlim()
         ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
         ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
-        # want to keep a constant y perspective to compare algos
-        #ax.set_ylim(-0.025, 0.025)
         title = figname.replace('.png', '').replace('_', ' ')
         ax.set_title(title, fontsize=20)
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
         # show table of boxplot results
-        self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, title)
+        self._show_breath_by_breath_algo_table(proc_frame, title)
         plt.show(fig)
 
     def perform_algo_based_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), algos=[]):
