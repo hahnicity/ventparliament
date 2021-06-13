@@ -320,7 +320,7 @@ class TestResultsContainer(object):
                 assert pt_df.iloc[3]['insp_effi_2'] == 0.0
                 assert pt_df.iloc[4]['insp_effi_2'] == 0.0
 
-    def test_analyze_per_patient_df_mad_std(self):
+    def test_analyze_per_patient_df_ad_std(self):
         self.test_con.calc_windows(self.test_con.proc_results)
         self.test_con.calc_async_index(self.test_con.proc_results)
         r = self.test_con.proc_results
@@ -339,14 +339,14 @@ class TestResultsContainer(object):
             assert d.patient_id.unique()[0] == pt
             iipr_row = d[d.algo == 'iipr'].iloc[0]
             vic_row = d[d.algo == 'vicario_nieap'].iloc[0]
-            eq_(vic_row.mad_pt, np.nanmedian(pt_df['vicario_nieap_diff'].abs()))
+            eq_(vic_row.ad_pt, np.nanmedian(pt_df['vicario_nieap_diff'].abs()))
             eq_(vic_row.std_pt, np.nanstd(pt_df['vicario_nieap']))
             if pt == '0640RPI28':
-                assert np.isnan(iipr_row.mad_pt)
+                assert np.isnan(iipr_row.ad_pt)
                 assert np.isnan(iipr_row.std_pt)
                 continue
             eq_(iipr_row.std_pt, np.nanstd(pt_df['iipr']))
-            eq_(iipr_row.mad_pt, np.nanmedian(pt_df['iipr_diff'].abs()))
+            eq_(iipr_row.ad_pt, np.nanmedian(pt_df['iipr_diff'].abs()))
 
     def test_analyze_per_patient_df_wmd(self):
         self.test_con.calc_windows(self.test_con.proc_results)
@@ -367,13 +367,13 @@ class TestResultsContainer(object):
             assert d.patient_id.unique()[0] == pt
             iipr_row = d[d.algo == 'iipr'].iloc[0]
             vic_row = d[d.algo == 'vicario_nieap'].iloc[0]
-            eq_(vic_row.mad_wmd, np.nanmedian(pt_df['vicario_nieap_wmd_2'].abs()))
+            eq_(vic_row.ad_wmd, np.nanmedian(pt_df['vicario_nieap_wmd_2'].abs()))
             eq_(vic_row.std_wmd, np.nanstd(pt_df['vicario_nieap_wmd_2']))
             if pt == '0640RPI28':
-                assert np.isnan(iipr_row.mad_wmd)
+                assert np.isnan(iipr_row.ad_wmd)
                 assert np.isnan(iipr_row.std_wmd)
                 continue
-            eq_(iipr_row.mad_wmd, np.nanmedian(pt_df['iipr_wmd_2'].abs()))
+            eq_(iipr_row.ad_wmd, np.nanmedian(pt_df['iipr_wmd_2'].abs()))
             eq_(iipr_row.std_wmd, np.nanstd(pt_df['iipr_wmd_2']))
 
     def test_analyze_per_patient_df_smd(self):
@@ -395,98 +395,98 @@ class TestResultsContainer(object):
             assert d.patient_id.unique()[0] == pt
             iipr_row = d[d.algo == 'iipr'].iloc[0]
             vic_row = d[d.algo == 'vicario_nieap'].iloc[0]
-            eq_(vic_row.mad_smd, np.nanmedian(pt_df['vicario_nieap_smd_2'].abs()))
+            eq_(vic_row.ad_smd, np.nanmedian(pt_df['vicario_nieap_smd_2'].abs()))
             eq_(vic_row.std_smd, np.nanstd(pt_df['vicario_nieap_smd_2']))
             if pt == '0640RPI28':
-                assert np.isnan(iipr_row.mad_smd)
+                assert np.isnan(iipr_row.ad_smd)
                 assert np.isnan(iipr_row.std_smd)
                 continue
-            eq_(iipr_row.mad_smd, np.nanmedian(pt_df['iipr_smd_2'].abs()))
+            eq_(iipr_row.ad_smd, np.nanmedian(pt_df['iipr_smd_2'].abs()))
             eq_(iipr_row.std_smd, np.nanstd(pt_df['iipr_smd_2']))
 
-    def test_preprocess_mad_std_in_df_no_window(self):
+    def test_preprocess_ad_std_in_df_no_window(self):
         self.test_con.calc_windows(self.test_con.proc_results)
         self.test_con.calc_async_index(self.test_con.proc_results)
         r = self.test_con.proc_results
         pp_all = self.test_con.analyze_per_patient_df(r)
-        mad_std = self.test_con.preprocess_mad_std_in_df(pp_all, None)
+        ad_std = self.test_con.preprocess_ad_std_in_df(pp_all, None)
 
-        assert len(mad_std) == 2
-        mads = pp_all[pp_all.algo == 'iipr']['mad_pt']
-        assert (mad_std['iipr'][0]==mads[~mads.isna()]).all()
-        mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_pt']
-        assert (mad_std['vicario_nieap'][0]==mads[~mads.isna()]).all()
+        assert len(ad_std) == 2
+        ads = pp_all[pp_all.algo == 'iipr']['ad_pt']
+        assert (ad_std['iipr'][0]==ads[~ads.isna()]).all()
+        ads = pp_all[pp_all.algo == 'vicario_nieap']['ad_pt']
+        assert (ad_std['vicario_nieap'][0]==ads[~ads.isna()]).all()
 
         stds = pp_all[pp_all.algo == 'iipr']['std_pt']
-        assert (mad_std['iipr'][1]==stds[~stds.isna()]).all()
+        assert (ad_std['iipr'][1]==stds[~stds.isna()]).all()
         stds = pp_all[pp_all.algo == 'vicario_nieap']['std_pt']
-        assert (mad_std['vicario_nieap'][1]==stds[~stds.isna()]).all()
+        assert (ad_std['vicario_nieap'][1]==stds[~stds.isna()]).all()
 
-        mads = pp_all[pp_all.algo == 'iipr']['mad_pt']
-        assert (mad_std['iipr'][2]==np.nanmean(mads))
-        mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_pt']
-        assert (mad_std['vicario_nieap'][2]==np.nanmean(mads))
+        ads = pp_all[pp_all.algo == 'iipr']['ad_pt']
+        assert (ad_std['iipr'][2]==np.nanmean(ads))
+        ads = pp_all[pp_all.algo == 'vicario_nieap']['ad_pt']
+        assert (ad_std['vicario_nieap'][2]==np.nanmean(ads))
 
         stds = pp_all[pp_all.algo == 'iipr']['std_pt']
-        assert (mad_std['iipr'][3]==np.nanmean(stds))
+        assert (ad_std['iipr'][3]==np.nanmean(stds))
         stds = pp_all[pp_all.algo == 'vicario_nieap']['std_pt']
-        assert (mad_std['vicario_nieap'][3]==np.nanmean(stds))
+        assert (ad_std['vicario_nieap'][3]==np.nanmean(stds))
 
-    def test_preprocess_mad_std_in_df_wmd(self):
+    def test_preprocess_ad_std_in_df_wmd(self):
         self.test_con.calc_windows(self.test_con.proc_results)
         self.test_con.calc_async_index(self.test_con.proc_results)
         r = self.test_con.proc_results
         pp_all = self.test_con.analyze_per_patient_df(r)
-        mad_std = self.test_con.preprocess_mad_std_in_df(pp_all, 'wmd')
+        ad_std = self.test_con.preprocess_ad_std_in_df(pp_all, 'wmd')
 
-        assert len(mad_std) == 2
-        mads = pp_all[pp_all.algo == 'iipr']['mad_wmd']
-        assert (mad_std['iipr'][0]==mads[~mads.isna()]).all()
-        mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_wmd']
-        assert (mad_std['vicario_nieap'][0]==mads[~mads.isna()]).all()
-
-        stds = pp_all[pp_all.algo == 'iipr']['std_wmd']
-        assert (mad_std['iipr'][1]==stds[~stds.isna()]).all()
-        stds = pp_all[pp_all.algo == 'vicario_nieap']['std_wmd']
-        assert (mad_std['vicario_nieap'][1]==stds[~stds.isna()]).all()
-
-        mads = pp_all[pp_all.algo == 'iipr']['mad_wmd']
-        assert (mad_std['iipr'][2]==np.nanmean(mads))
-        mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_wmd']
-        assert (mad_std['vicario_nieap'][2]==np.nanmean(mads))
+        assert len(ad_std) == 2
+        ads = pp_all[pp_all.algo == 'iipr']['ad_wmd']
+        assert (ad_std['iipr'][0]==ads[~ads.isna()]).all()
+        ads = pp_all[pp_all.algo == 'vicario_nieap']['ad_wmd']
+        assert (ad_std['vicario_nieap'][0]==ads[~ads.isna()]).all()
 
         stds = pp_all[pp_all.algo == 'iipr']['std_wmd']
-        assert (mad_std['iipr'][3]==np.nanmean(stds))
+        assert (ad_std['iipr'][1]==stds[~stds.isna()]).all()
         stds = pp_all[pp_all.algo == 'vicario_nieap']['std_wmd']
-        assert (mad_std['vicario_nieap'][3]==np.nanmean(stds))
+        assert (ad_std['vicario_nieap'][1]==stds[~stds.isna()]).all()
 
-    def test_preprocess_mad_std_in_df_smd(self):
+        ads = pp_all[pp_all.algo == 'iipr']['ad_wmd']
+        assert (ad_std['iipr'][2]==np.nanmean(ads))
+        ads = pp_all[pp_all.algo == 'vicario_nieap']['ad_wmd']
+        assert (ad_std['vicario_nieap'][2]==np.nanmean(ads))
+
+        stds = pp_all[pp_all.algo == 'iipr']['std_wmd']
+        assert (ad_std['iipr'][3]==np.nanmean(stds))
+        stds = pp_all[pp_all.algo == 'vicario_nieap']['std_wmd']
+        assert (ad_std['vicario_nieap'][3]==np.nanmean(stds))
+
+    def test_preprocess_ad_std_in_df_smd(self):
         self.test_con.calc_windows(self.test_con.proc_results)
         self.test_con.calc_async_index(self.test_con.proc_results)
         r = self.test_con.proc_results
         pp_all = self.test_con.analyze_per_patient_df(r)
-        mad_std = self.test_con.preprocess_mad_std_in_df(pp_all, 'smd')
+        ad_std = self.test_con.preprocess_ad_std_in_df(pp_all, 'smd')
 
-        assert len(mad_std) == 2
-        mads = pp_all[pp_all.algo == 'iipr']['mad_smd']
-        assert (mad_std['iipr'][0]==mads[~mads.isna()]).all()
-        mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_smd']
-        assert (mad_std['vicario_nieap'][0]==mads[~mads.isna()]).all()
-
-        stds = pp_all[pp_all.algo == 'iipr']['std_smd']
-        assert (mad_std['iipr'][1]==stds[~stds.isna()]).all()
-        stds = pp_all[pp_all.algo == 'vicario_nieap']['std_smd']
-        assert (mad_std['vicario_nieap'][1]==stds[~stds.isna()]).all()
-
-        mads = pp_all[pp_all.algo == 'iipr']['mad_smd']
-        assert (mad_std['iipr'][2]==np.nanmean(mads))
-        mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_smd']
-        assert (mad_std['vicario_nieap'][2]==np.nanmean(mads))
+        assert len(ad_std) == 2
+        ads = pp_all[pp_all.algo == 'iipr']['ad_smd']
+        assert (ad_std['iipr'][0]==ads[~ads.isna()]).all()
+        ads = pp_all[pp_all.algo == 'vicario_nieap']['ad_smd']
+        assert (ad_std['vicario_nieap'][0]==ads[~ads.isna()]).all()
 
         stds = pp_all[pp_all.algo == 'iipr']['std_smd']
-        assert (mad_std['iipr'][3]==np.nanmean(stds))
+        assert (ad_std['iipr'][1]==stds[~stds.isna()]).all()
         stds = pp_all[pp_all.algo == 'vicario_nieap']['std_smd']
-        assert (mad_std['vicario_nieap'][3]==np.nanmean(stds))
+        assert (ad_std['vicario_nieap'][1]==stds[~stds.isna()]).all()
+
+        ads = pp_all[pp_all.algo == 'iipr']['ad_smd']
+        assert (ad_std['iipr'][2]==np.nanmean(ads))
+        ads = pp_all[pp_all.algo == 'vicario_nieap']['ad_smd']
+        assert (ad_std['vicario_nieap'][2]==np.nanmean(ads))
+
+        stds = pp_all[pp_all.algo == 'iipr']['std_smd']
+        assert (ad_std['iipr'][3]==np.nanmean(stds))
+        stds = pp_all[pp_all.algo == 'vicario_nieap']['std_smd']
+        assert (ad_std['vicario_nieap'][3]==np.nanmean(stds))
 
     def test_extract_medians_and_iqr_median(self):
         self.test_con.boot_resamples = 0

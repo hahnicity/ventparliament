@@ -72,8 +72,8 @@ class ResultsContainer(object):
             '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
             '$\dag$', '$\ddag$', '$\P$'
         ]
-        self.algo_markers = {algo: self.scatter_marker_symbols[i] for i, algo in enumerate(self.algos_used)}
-        self.algo_colors = {algo: cc.cm.glasbey(i) for i, algo in enumerate(self.algos_used)}
+        self.algo_markers = {}
+        self.algo_colors = {}
         self.pp_frames = {}
         self.bb_frames = {}
 
@@ -152,31 +152,31 @@ class ResultsContainer(object):
 
     def _get_windowing_colnames(self, windowing):
         if windowing is None:
-            mad_col = 'mad_pt'
+            ad_col = 'ad_pt'
             std_col = 'std_pt'
         elif windowing == 'wmd':
-            mad_col = 'mad_wmd'
+            ad_col = 'ad_wmd'
             std_col = 'std_wmd'
         elif windowing == 'smd':
-            mad_col = 'mad_smd'
+            ad_col = 'ad_smd'
             std_col = 'std_smd'
         else:
             raise ValueError('windowing variable must be None, "wmd", or "smd"')
-        return mad_col, std_col
+        return ad_col, std_col
 
-    def _mad_std_scatter(self, mad_std, windowing, plt_title, figname, individual_patients, std_lim):
+    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim):
         """
-        Perform scatter plot using with MAD and std information for each algorithm.
+        Perform scatter plot using with AD and std information for each algorithm.
         """
-        algos_in_order = sorted(list(mad_std.keys()))
+        algos_in_order = sorted(list(ad_std.keys()))
         algo_dict = {algo: {'m': self.algo_markers[algo], 'c': self.algo_colors[algo]} for algo in algos_in_order}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
         if individual_patients:
             for i, algo in enumerate(algos_in_order):
                 ax.scatter(
-                    x=mad_std[algo][0],
-                    y=mad_std[algo][1],
+                    x=ad_std[algo][0],
+                    y=ad_std[algo][1],
                     marker=algo_dict[algo]['m'],
                     color=algo_dict[algo]['c'],
                     label=algo,
@@ -187,8 +187,8 @@ class ResultsContainer(object):
 
         for i, algo in enumerate(algos_in_order):
             ax.scatter(
-                x=mad_std[algo][2],
-                y=mad_std[algo][3],
+                x=ad_std[algo][2],
+                y=ad_std[algo][3],
                 marker=algo_dict[algo]['m'],
                 color=algo_dict[algo]['c'],
                 label=algo if not individual_patients else None,
@@ -198,12 +198,12 @@ class ResultsContainer(object):
                 zorder=len(algos_in_order)+2-i,
                 linewidths=1,
             )
-        x = [mad_std[a][2] for a in algos_in_order]
-        y = [mad_std[a][3] for a in algos_in_order]
+        x = [ad_std[a][2] for a in algos_in_order]
+        y = [ad_std[a][3] for a in algos_in_order]
         ax.tick_params(axis='x', labelsize=14)
         ax.tick_params(axis='y', labelsize=14)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
-        ax.set_xlabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
+        ax.set_xlabel('Absolute Difference of (Compliance - Algo)', fontsize=16)
         if std_lim is not None and len(x) > 1:
             ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
             ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
@@ -223,9 +223,9 @@ class ResultsContainer(object):
 
         # show table of boxplot results
         table = PrettyTable()
-        table.field_names = ['Algorithm', 'Shorthand Name', 'MAD (Median Absolute Deviation)', 'Standard Deviation (std)']
-        medians = np.array([mad_std[algo][2] for algo in algos_in_order])
-        stds = np.array([mad_std[algo][3] for algo in algos_in_order])
+        table.field_names = ['Algorithm', 'Shorthand Name', 'Absolute Difference', 'Standard Deviation (std)']
+        medians = np.array([ad_std[algo][2] for algo in algos_in_order])
+        stds = np.array([ad_std[algo][3] for algo in algos_in_order])
         medians = medians.round(2)
         stds = stds.round(2)
         for i, algo in enumerate(algos_in_order):
@@ -445,7 +445,7 @@ class ResultsContainer(object):
         """
         row_results = []
         for patient_id, frame in df.groupby('patient_id'):
-            # find MAD per patient, per algo
+            # find AD per patient, per algo
             algos_in_frame = set(df.columns).intersection(self.algos_used)
             for algo in algos_in_frame:
                 row = [patient_id, algo]
@@ -460,7 +460,7 @@ class ResultsContainer(object):
                 row.append(np.nanmedian(frame['{}_smd_{}'.format(algo, self.window_n)].abs()))
                 row.append(np.nanstd(frame['{}_smd_{}'.format(algo, self.window_n)]))
                 row_results.append(row)
-        cols = ['patient_id', 'algo', 'mad_pt', 'std_pt', 'mad_wmd', 'std_wmd', 'mad_smd', 'std_smd']
+        cols = ['patient_id', 'algo', 'ad_pt', 'std_pt', 'ad_wmd', 'std_wmd', 'ad_smd', 'std_smd']
         return pd.DataFrame(row_results, columns=cols)
 
     def analyze_results(self):
@@ -469,7 +469,7 @@ class ResultsContainer(object):
 
         1. Analyze results on a breath by breath basis
         2. Analyze results on a patient by patient basis
-            1/2a. Obtain MAD (median absolute dev) between algo and gold stnd compliance
+            1/2a. Obtain AD (absolute difference) between algo and gold stnd compliance
         """
         if isinstance(self.proc_results, list):
             warn('Called analyze_results before any results were collated. Call collate_data first!')
@@ -665,6 +665,8 @@ class ResultsContainer(object):
         what our gold standard compliances are for specific time points. Filter
         """
         self.algos_used = algos_used
+        self.algo_markers = {algo: self.scatter_marker_symbols[i] for i, algo in enumerate(self.algos_used)}
+        self.algo_colors = {algo: cc.cm.glasbey(i) for i, algo in enumerate(self.algos_used)}
         proc_results = pd.concat(self.raw_results)
         proc_results.index = range(len(proc_results))
         for patient, frame in proc_results.groupby('patient_id'):
@@ -722,17 +724,17 @@ class ResultsContainer(object):
         pp1 = self.analyze_per_patient_df(self.proc_results[mask1])
         pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
 
-        mad_std1 = self.preprocess_mad_std_in_df(pp1, windowing)
-        mad_std2 = self.preprocess_mad_std_in_df(pp2, windowing)
+        ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing)
+        ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing)
 
-        mad_std = copy(mad_std1)
+        ad_std = copy(ad_std1)
         for algo in pp1.algo.unique():
             for i in range(4):
-                mad_std[algo][i] = mad_std2[algo][i] - mad_std1[algo][i]
+                ad_std[algo][i] = ad_std2[algo][i] - ad_std1[algo][i]
 
         plt_title = '{} vs {}'.format(mask1_name, mask2_name)
         figname = '{}_vs_{}.png'.format(mask1_name, mask2_name)
-        self._mad_std_scatter(mad_std, windowing, plt_title, figname, individual_patients, std_lim)
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim)
 
     def compare_breath_level_masks(self, mask1_name, mask2_name, figname='custom_breath_by_breath.png'):
         """
@@ -795,18 +797,18 @@ class ResultsContainer(object):
         """
         pp = self.analyze_per_patient_df(self.proc_results)
 
-        mad_std1 = self.preprocess_mad_std_in_df(pp, windowing1)
-        mad_std2 = self.preprocess_mad_std_in_df(pp, windowing2)
+        ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1)
+        ad_std2 = self.preprocess_ad_std_in_df(pp, windowing2)
 
-        mad_std = copy(mad_std1)
-        for algo in mad_std1.keys():
+        ad_std = copy(ad_std1)
+        for algo in ad_std1.keys():
             for i in range(4):
-                mad_std[algo][i] = mad_std2[algo][i] - mad_std1[algo][i]
+                ad_std[algo][i] = ad_std2[algo][i] - ad_std1[algo][i]
 
         name_mapping = {'smd': 'SMD', 'wmd': 'WMD', None: 'No Windowing'}
         plt_title = '{} vs {}'.format(name_mapping[windowing1], name_mapping[windowing2])
         figname = '{}_vs_{}.png'.format(windowing1, windowing2)
-        self._mad_std_scatter(mad_std, 'window_compr', plt_title, figname, individual_patients, std_lim)
+        self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim)
 
     def extract_medians_and_iqr(self, df):
         """
@@ -1022,47 +1024,47 @@ class ResultsContainer(object):
             'vc_only': (self.proc_results.ventmode == 'vc'),
         }
 
-    def preprocess_mad_std_in_df(self, df, windowing):
+    def preprocess_ad_std_in_df(self, df, windowing):
         # this function is really not necessary. But its here, and it does save on
         # some complexity of computing things in the graphing function itself, like
         # performing some nan filtering and doing dataset slicing
         algos = sorted(list(df.algo.unique()))
-        mad_std = {algo: [[], [], None, None] for algo in algos}
-        mad_col, std_col = self._get_windowing_colnames(windowing)
+        ad_std = {algo: [[], [], None, None] for algo in algos}
+        ad_col, std_col = self._get_windowing_colnames(windowing)
 
         for algo in algos:
-            nan_mask = df[df.algo==algo][mad_col].isna()
+            nan_mask = df[df.algo==algo][ad_col].isna()
             if nan_mask.values.all():
-                del mad_std[algo]
+                del ad_std[algo]
                 continue
             non_nan = df[df.algo==algo][~nan_mask]
-            mad_std[algo][0] = non_nan[mad_col]
-            mad_std[algo][1] = non_nan[std_col]
-            mad_std[algo][2] = np.mean(mad_std[algo][0])
-            mad_std[algo][3] = np.mean(mad_std[algo][1])
+            ad_std[algo][0] = non_nan[ad_col]
+            ad_std[algo][1] = non_nan[std_col]
+            ad_std[algo][2] = np.mean(ad_std[algo][0])
+            ad_std[algo][3] = np.mean(ad_std[algo][1])
 
-        return mad_std
+        return ad_std
 
     def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
-        X-axis is MAD and Y-axis is std.
+        X-axis is AD and Y-axis is std.
         """
-        mad_std = self.preprocess_mad_std_in_df(df, windowing)
-        self._mad_std_scatter(mad_std, windowing, plt_title, figname, individual_patients, std_lim)
+        ad_std = self.preprocess_ad_std_in_df(df, windowing)
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim)
 
-    def plot_algo_mad_std_boxplots(self, df, windowing, figname_prefix):
+    def plot_algo_ad_std_boxplots(self, df, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         # you can use bootstrap too if you want, but for now I'm not going to
-        mad_col, std_col = self._get_windowing_colnames(windowing)
+        ad_col, std_col = self._get_windowing_colnames(windowing)
         algo_ordering = sorted(list(df.algo.unique()))
 
-        sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
-        ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
+        sns.boxplot(x='algo', y=ad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
+        ax.set_ylabel('Difference of (Compliance - Algo)', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 26)
-        fig.savefig(self.results_dir.joinpath('{}_mad_windowing_{}_boxplot_result.png'.format(windowing, figname_prefix)).resolve(), dpi=self.dpi)
+        fig.savefig(self.results_dir.joinpath('{}_ad_windowing_{}_boxplot_result.png'.format(windowing, figname_prefix)).resolve(), dpi=self.dpi)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True, showfliers=False)
@@ -1344,7 +1346,7 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['all'][self.window_n], windowing, 'patient_by_patient')
+            self.plot_algo_ad_std_boxplots(self.pp_frames['all'][self.window_n], windowing, 'patient_by_patient')
 
         # Patient by patient. no asynchronies
         self.plot_algo_scatter(
@@ -1356,7 +1358,7 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['no_async'][self.window_n], windowing, 'patient_by_patient_no_async')
+            self.plot_algo_ad_std_boxplots(self.pp_frames['no_async'][self.window_n], windowing, 'patient_by_patient_no_async')
 
         # Asynchronies only
         self.plot_algo_scatter(
@@ -1368,7 +1370,7 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['async'][self.window_n], windowing, 'asynchronies_only_pbp')
+            self.plot_algo_ad_std_boxplots(self.pp_frames['async'][self.window_n], windowing, 'asynchronies_only_pbp')
 
         # VC only patient by patient.
         self.plot_algo_scatter(
@@ -1380,7 +1382,7 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['vc_only'][self.window_n], windowing, 'vc_only_pbp')
+            self.plot_algo_ad_std_boxplots(self.pp_frames['vc_only'][self.window_n], windowing, 'vc_only_pbp')
 
         # VC only, non-asynchronies
         self.plot_algo_scatter(
@@ -1412,7 +1414,7 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['pc_only'][self.window_n], windowing, 'pc_only_pbp')
+            self.plot_algo_ad_std_boxplots(self.pp_frames['pc_only'][self.window_n], windowing, 'pc_only_pbp')
 
         # PC only, non-asynchronies
         self.plot_algo_scatter(
@@ -1444,7 +1446,7 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['prvc_only'][self.window_n], windowing, 'prvc_only_pbp')
+            self.plot_algo_ad_std_boxplots(self.pp_frames['prvc_only'][self.window_n], windowing, 'prvc_only_pbp')
 
         # PRVC only, non-asynchronies
         self.plot_algo_scatter(
@@ -1527,7 +1529,7 @@ class ResultsContainer(object):
         )
 
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['all_pressure_only'][self.window_n], windowing, 'pressure_only_pbp')
+            self.plot_algo_ad_std_boxplots(self.pp_frames['all_pressure_only'][self.window_n], windowing, 'pressure_only_pbp')
 
         # Artifacts only
         self.plot_algo_scatter(
