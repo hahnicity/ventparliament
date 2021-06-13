@@ -6,7 +6,6 @@ Main analysis code
 """
 import argparse
 from copy import copy
-from itertools import cycle
 from pathlib import Path
 import sys
 import traceback
@@ -72,16 +71,18 @@ class ResultsContainer(object):
             '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
             '$\dag$', '$\ddag$', '$\P$'
         ]
+        self.algo_markers = {algo: self.scatter_marker_symbols[i] for i, algo in enumerate(self.algos_used)}
+        self.algo_colors = {algo: cc.cm.glasbey(i) for i, algo in enumerate(self.algos_used)}
         self.pp_frames = {}
         self.bb_frames = {}
 
-    def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians=None, **kwargs):
+    def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians=None, palette=None, **kwargs):
         """
         Basically an exact replica of what happens in seaborn except for support of
         usermedians
         """
         plotter = _BoxPlotter(x=None, y=None, hue=None, data=data, order=None, hue_order=None,
-                              orient=None, color=None, palette=None, saturation=.75, width=.8,
+                              orient=None, color=None, palette=palette, saturation=.75, width=.8,
                               dodge=True, fliersize=5, linewidth=None)
         kwargs.update(dict(whis=1.5, showfliers=False))
         vert = plotter.orient == "v"
@@ -159,9 +160,7 @@ class ResultsContainer(object):
         """
         Perform scatter plot using with MAD and std information for each algorithm.
         """
-        markers = cycle(self.scatter_marker_symbols)
-        colors = [cc.cm.glasbey(i) for i in range(len(algos_in_order))]
-        algo_dict = {algo: {'m': next(markers), 'c': colors[i]} for i, algo in enumerate(algos_in_order)}
+        algo_dict = {algo: {'m': self.algo_markers[algo], 'c': self.algo_colors[algo]} for algo in algos_in_order}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
         if individual_patients:
@@ -276,7 +275,7 @@ class ResultsContainer(object):
             plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28, y=.9)
             plt.show(fig)
 
-    def _regplot_wmd(self, df, algo, x_col, win_size, ax, winsorizor, scatter_kws, line_kws, absolute, robust, robust_and_reg, show_median):
+    def _regplot_wmd(self, df, algo, x_col, win_size, ax, winsorizor, scatter_kws, line_kws, absolute, robust, robust_and_reg, show_median, show_algo_color=True):
         """
         Perform regression plotting for WMD versus some index
 
@@ -300,6 +299,7 @@ class ResultsContainer(object):
         wmd_colname = '{}_wmd_{}'.format(algo, win_size)
         data[wmd_colname] = abs_lmda(data[wmd_colname])
         data[wmd_colname] = winsorize(data[wmd_colname].values, limits=winsorizor)
+        color = self.algo_colors[algo] if show_algo_color else None
         if not robust_and_reg:
             sns.regplot(
                 x=x_col,
@@ -310,6 +310,7 @@ class ResultsContainer(object):
                 ax=ax,
                 robust=robust,
                 n_boot=self.boot_resamples,
+                color=color,
             )
         else:
             line_kws['label'] = 'non-robust'
@@ -322,6 +323,7 @@ class ResultsContainer(object):
                 ax=ax,
                 robust=False,
                 n_boot=self.boot_resamples,
+                color=color,
             )
             # regplot on robust is taking up all the time. Why?
             line_kws['label'] = 'robust'
@@ -1037,7 +1039,7 @@ class ResultsContainer(object):
 
         # alphabetical order again
         algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
-        self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians, notch=False, bootstrap=self.boot_resamples)
+        self._draw_seaborn_boxplot_with_bootstrap(df[sorted_diff_cols], ax, medians, notch=False, bootstrap=self.boot_resamples, palette=[self.algo_colors[algo] for algo in algos_in_order])
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
         plt.setp(xtick_names, rotation=60, fontsize=14)
         xlim = ax.get_xlim()
@@ -1141,7 +1143,7 @@ class ResultsContainer(object):
 
                 for size in windows:
                     win_col = col.format(size)
-                    self._regplot_wmd(self.proc_results, algo, win_col, size, axes[i][j], winsorizor, {'s': 0, 'alpha': .0}, {'label': size, 'lw': 3}, absolute, robust, False, False)
+                    self._regplot_wmd(self.proc_results, algo, win_col, size, axes[i][j], winsorizor, {'s': 0, 'alpha': .0}, {'label': size, 'lw': 3}, absolute, robust, False, False, show_algo_color=False)
 
                 if len(axes[i][j].lines) != 0:
                     axes[i][j].legend()
