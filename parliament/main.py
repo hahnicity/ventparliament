@@ -164,7 +164,7 @@ class ResultsContainer(object):
             raise ValueError('windowing variable must be None, "wmd", or "smd"')
         return ad_col, std_col
 
-    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim):
+    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, custom_xlabel=None, custom_ylabel=None):
         """
         Perform scatter plot using with AD and std information for each algorithm.
         """
@@ -202,8 +202,10 @@ class ResultsContainer(object):
         y = [ad_std[a][3] for a in algos_in_order]
         ax.tick_params(axis='x', labelsize=14)
         ax.tick_params(axis='y', labelsize=14)
-        ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
-        ax.set_xlabel('Absolute Difference of (Compliance - Algo)', fontsize=16)
+        xlabel = 'Absolute Difference of (Compliance - Algo)' if not custom_xlabel else custom_xlabel
+        ylabel = 'Standard Deviation ($\sigma$) of Algo' if not custom_ylabel else custom_ylabel
+        ax.set_ylabel(ylabel, fontsize=16)
+        ax.set_xlabel(xlabel, fontsize=16)
         if std_lim is not None and len(x) > 1:
             ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
             ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
@@ -734,7 +736,9 @@ class ResultsContainer(object):
 
         plt_title = '{} vs {}'.format(mask1_name, mask2_name)
         figname = '{}_vs_{}.png'.format(mask1_name, mask2_name)
-        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim)
+        xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(mask1_name, mask2_name)
+        ylabel = 'Standard Deviation ($\sigma$) of Algo'
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
     def compare_breath_level_masks(self, mask1_name, mask2_name, figname='custom_breath_by_breath.png'):
         """
@@ -808,7 +812,8 @@ class ResultsContainer(object):
         name_mapping = {'smd': 'SMD', 'wmd': 'WMD', None: 'No Windowing'}
         plt_title = '{} vs {}'.format(name_mapping[windowing1], name_mapping[windowing2])
         figname = '{}_vs_{}.png'.format(windowing1, windowing2)
-        self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim)
+        xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(name_mapping[windowing1], name_mapping[windowing2])
+        self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
     def extract_medians_and_iqr(self, df):
         """
