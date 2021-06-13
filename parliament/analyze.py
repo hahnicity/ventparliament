@@ -50,9 +50,12 @@ class FileCalculations(object):
         'vicario_co': 'Vicario Constrained Optimization',
         'vicario_nieap': 'Vicario Non-Invasive Estimation of Alveolar Pressure',
     }
+    # pt exp least squares algos are available for pc/prvc because pressure
+    # should theoretically operate similarly between different modes during
+    # expiration
     algos_unavailable_for_pc_prvc = [
         'iimipr', 'iipr', 'iipredator', 'mipr', 'predator', 'major',
-        'polynomial', 'pt_insp_lstsq', 'howe_lstsq', 'pt_exp_lstsq',
+        'polynomial', 'pt_insp_lstsq',
     ]
     algos_unavailable_for_vc = ['kannangara', 'ft_insp_lstsq']
 

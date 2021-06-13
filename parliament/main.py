@@ -156,10 +156,11 @@ class ResultsContainer(object):
             raise ValueError('windowing variable must be None, "wmd", or "smd"')
         return mad_col, std_col
 
-    def _mad_std_scatter(self, mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim):
+    def _mad_std_scatter(self, mad_std, windowing, plt_title, figname, individual_patients, std_lim):
         """
         Perform scatter plot using with MAD and std information for each algorithm.
         """
+        algos_in_order = sorted(list(mad_std.keys()))
         algo_dict = {algo: {'m': self.algo_markers[algo], 'c': self.algo_colors[algo]} for algo in algos_in_order}
         fig, ax = plt.subplots(figsize=(3*6.5, 3*2.5))
 
@@ -235,7 +236,6 @@ class ResultsContainer(object):
         display(HTML('<h2>{}</h2>'.format(plt_title)))
         display(HTML(soup.prettify()))
         plt.show(fig)
-        return mad_std, algos_in_order
 
     def _perform_single_window_analysis(self, df, absolute, winsorizor, algos, robust, robust_and_reg, show_median):
         nrows = 4
@@ -376,6 +376,7 @@ class ResultsContainer(object):
         medians = medians.round(2)
         iqr = iqr.round(2)
         stds = stds.round(2)
+        # XXX this seems pretty brittle actually. given that the algo is not linked with medians/iqr/ OR std
         for i, algo in enumerate(algos_in_order):
             if not np.isnan(medians[i]):
                 table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], iqr[i, 0], iqr[i, 1], stds[i]])
@@ -701,6 +702,10 @@ class ResultsContainer(object):
         :param mask1_name: mask name based on masks obtained from `get_masks`
         :param mask2_name: mask name based on masks obtained from `get_masks`
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param individual_patients: show individual_patients scatter points
+        :param std_lim: limit graphs by standard deviation within certain
+                        factor. Normally is set to None (no limit). But can be
+                        set to any floating value > 0.
         """
         masks = self.get_masks()
         mask1 = masks[mask1_name]
@@ -708,19 +713,18 @@ class ResultsContainer(object):
 
         pp1 = self.analyze_per_patient_df(self.proc_results[mask1])
         pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
-        algos_in_order = sorted(list(pp1.algo.unique()))
 
-        mad_std1, _ = self.preprocess_mad_std_in_df(pp1, windowing)
-        mad_std2, _ = self.preprocess_mad_std_in_df(pp2, windowing)
+        mad_std1 = self.preprocess_mad_std_in_df(pp1, windowing)
+        mad_std2 = self.preprocess_mad_std_in_df(pp2, windowing)
 
         mad_std = copy(mad_std1)
-        for algo in algos_in_order:
+        for algo in pp1.algo.unique():
             for i in range(4):
                 mad_std[algo][i] = mad_std2[algo][i] - mad_std1[algo][i]
 
         plt_title = '{} vs {}'.format(mask1_name, mask2_name)
         figname = '{}_vs_{}.png'.format(mask1_name, mask2_name)
-        return self._mad_std_scatter(mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim)
+        self._mad_std_scatter(mad_std, windowing, plt_title, figname, individual_patients, std_lim)
 
     def compare_breath_level_masks(self, mask1_name, mask2_name, figname='custom_breath_by_breath.png'):
         """
@@ -731,8 +735,7 @@ class ResultsContainer(object):
         :param figname: figure name to save
         """
         algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used)
-        diff_cols = ["{}_diff".format(algo) for algo in algos_in_frame]
-        sorted_diff_cols = sorted(diff_cols)
+        sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
 
         masks = self.get_masks()
         mask1 = masks[mask1_name]
@@ -751,7 +754,6 @@ class ResultsContainer(object):
 
         # alphabetical order again
         algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
-        #colors = [cc.cm.glasbey(i) for i in range(len(algos_in_order))]
         sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=self.boot_resamples, showfliers=False, palette='Set2')
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
         plt.setp(xtick_names, rotation=60, fontsize=14)
@@ -760,8 +762,6 @@ class ResultsContainer(object):
         ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.legend(fontsize=16)
-        # want to keep a constant y perspective to compare algos
-        #ax.set_ylim(-0.025, 0.025)
         title = figname.replace('.png', '').replace('_', ' ')
         ax.set_title(title, fontsize=20)
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
@@ -775,7 +775,38 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(algos_in_order, medians, iqr, stds, mask2_name)
         plt.show(fig)
 
+    def compare_window_strategies(self, windowing1, windowing2, individual_patients=False, std_lim=None):
+        """
+        Compare results of different window types to each other on patient by patient basis.
+        Plot results out with scatter plots as usual.
+
+        :param windowing1: window type to use first ('wmd', 'smd', or None)
+        :param windowing2: window type to use second ('wmd', 'smd', or None)
+        :param individual_patients: show individual_patients scatter points
+        :param std_lim: limit graphs by standard deviation within certain
+                        factor. Normally is set to None (no limit). But can be
+                        set to any floating value > 0.
+        """
+        pp = self.analyze_per_patient_df(self.proc_results)
+
+        mad_std1 = self.preprocess_mad_std_in_df(pp, windowing1)
+        mad_std2 = self.preprocess_mad_std_in_df(pp, windowing2)
+
+        mad_std = copy(mad_std1)
+        for algo in mad_std1.keys():
+            for i in range(4):
+                mad_std[algo][i] = mad_std2[algo][i] - mad_std1[algo][i]
+
+        name_mapping = {'smd': 'SMD', 'wmd': 'WMD', None: 'No Windowing'}
+        plt_title = '{} vs {}'.format(name_mapping[windowing1], name_mapping[windowing2])
+        figname = '{}_vs_{}.png'.format(windowing1, windowing2)
+        self._mad_std_scatter(mad_std, 'window_compr', plt_title, figname, individual_patients, std_lim)
+
     def extract_medians_and_iqr(self, df):
+        """
+        """
+        # XXX need to update this to return a dataframe with proper attachment of algos,
+        # medians, iqr, and std
         medians = []
         iqrs = []
         for col in df.columns:
@@ -999,7 +1030,7 @@ class ResultsContainer(object):
             mad_std[algo][2] = np.mean(mad_std[algo][0])
             mad_std[algo][3] = np.mean(mad_std[algo][1])
 
-        return mad_std, sorted(list(mad_std.keys()))
+        return mad_std
 
     def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim):
         """
@@ -1007,13 +1038,14 @@ class ResultsContainer(object):
 
         X-axis is MAD and Y-axis is std.
         """
-        mad_std, algos_in_order = self.preprocess_mad_std_in_df(df, windowing)
-        return self._mad_std_scatter(mad_std, windowing, plt_title, figname, algos_in_order, individual_patients, std_lim)
+        mad_std = self.preprocess_mad_std_in_df(df, windowing)
+        self._mad_std_scatter(mad_std, windowing, plt_title, figname, individual_patients, std_lim)
 
-    def plot_algo_mad_std_boxplots(self, df, algo_ordering, windowing, figname_prefix):
+    def plot_algo_mad_std_boxplots(self, df, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         # you can use bootstrap too if you want, but for now I'm not going to
         mad_col, std_col = self._get_windowing_colnames(windowing)
+        algo_ordering = sorted(list(df.algo.unique()))
 
         sns.boxplot(x='algo', y=mad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
         ax.set_ylabel('MAD (Median Absolute Deviation) of (Compliance - Algo)', fontsize=16)
@@ -1032,8 +1064,7 @@ class ResultsContainer(object):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         # XXX add WMD option
         algos_in_frame = set(df.columns).intersection(self.algos_used)
-        diff_cols = ["{}_diff".format(algo) for algo in algos_in_frame]
-        sorted_diff_cols = sorted(diff_cols)
+        sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
         medians, iqr = self.extract_medians_and_iqr(df[sorted_diff_cols])
         stds = df[sorted_diff_cols].std().values.round(5)
 
@@ -1289,7 +1320,7 @@ class ResultsContainer(object):
                         set to any floating value > 0.
         """
         # Patient by Patient. All breathing
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['all'][self.window_n],
             windowing,
             'Patient by patient results. No filters',
@@ -1298,10 +1329,10 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['all'][self.window_n], algos_in_order, windowing, 'patient_by_patient')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['all'][self.window_n], windowing, 'patient_by_patient')
 
         # Patient by patient. no asynchronies
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['no_async'][self.window_n],
             windowing,
             'Patient by patient results. No Asynchronies',
@@ -1310,10 +1341,10 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['no_async'][self.window_n], algos_in_order, windowing, 'patient_by_patient_no_async')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['no_async'][self.window_n], windowing, 'patient_by_patient_no_async')
 
         # Asynchronies only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['async'][self.window_n],
             windowing,
             'Patient by patient results. Asynchronies only',
@@ -1322,10 +1353,10 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['async'][self.window_n], algos_in_order, windowing, 'asynchronies_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['async'][self.window_n], windowing, 'asynchronies_only_pbp')
 
         # VC only patient by patient.
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['vc_only'][self.window_n],
             windowing,
             'Patient by patient results. VC only',
@@ -1334,10 +1365,10 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['vc_only'][self.window_n], algos_in_order, windowing, 'vc_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['vc_only'][self.window_n], windowing, 'vc_only_pbp')
 
         # VC only, non-asynchronies
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['vc_no_async'][self.window_n],
             windowing,
             'Patient by patient results. VC, No Asynchronies',
@@ -1347,7 +1378,7 @@ class ResultsContainer(object):
         )
 
         # VC only, asynchronies only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['vc_only_async'][self.window_n],
             windowing,
             'Patient by patient results. VC Asynchronies only',
@@ -1357,7 +1388,7 @@ class ResultsContainer(object):
         )
 
         # PC only patient by patient.
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['pc_only'][self.window_n],
             windowing,
             'Patient by patient results. PC only',
@@ -1366,10 +1397,10 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['pc_only'][self.window_n], algos_in_order, windowing, 'pc_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['pc_only'][self.window_n], windowing, 'pc_only_pbp')
 
         # PC only, non-asynchronies
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['pc_no_async'][self.window_n],
             windowing,
             'Patient by patient results. PC, No Asynchronies',
@@ -1379,7 +1410,7 @@ class ResultsContainer(object):
         )
 
         # PC only, asynchronies only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['pc_only_async'][self.window_n],
             windowing,
             'Patient by patient results. PC Asynchronies only',
@@ -1389,7 +1420,7 @@ class ResultsContainer(object):
         )
 
         # PRVC only patient by patient.
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['prvc_only'][self.window_n],
             windowing,
             'Patient by patient results. PRVC only',
@@ -1398,10 +1429,10 @@ class ResultsContainer(object):
             std_lim
         )
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['prvc_only'][self.window_n], algos_in_order, windowing, 'prvc_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['prvc_only'][self.window_n], windowing, 'prvc_only_pbp')
 
         # PRVC only, non-asynchronies
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['prvc_no_async'][self.window_n],
             windowing,
             'Patient by patient results. PRVC, No Asynchronies',
@@ -1411,7 +1442,7 @@ class ResultsContainer(object):
         )
 
         # PRVC only, asynchronies only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['prvc_only_async'][self.window_n],
             windowing,
             'Patient by patient results. PRVC Asynchronies only',
@@ -1421,7 +1452,7 @@ class ResultsContainer(object):
         )
 
         # no efforting only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['no_efforting'][self.window_n],
             windowing,
             'Patient by patient results. No Apparent Efforting',
@@ -1431,7 +1462,7 @@ class ResultsContainer(object):
         )
 
         # early efforting only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['early_efforting'][self.window_n],
             windowing,
             'Patient by patient results. Early Efforting',
@@ -1441,7 +1472,7 @@ class ResultsContainer(object):
         )
 
         # insp efforting only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['insp_efforting'][self.window_n],
             windowing,
             'Patient by patient results. Inspiratory Efforting',
@@ -1451,7 +1482,7 @@ class ResultsContainer(object):
         )
 
         # exp efforting only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['exp_efforting'][self.window_n],
             windowing,
             'Patient by patient results. Expiratory Efforting',
@@ -1461,7 +1492,7 @@ class ResultsContainer(object):
         )
 
         # all efforting only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['all_efforting'][self.window_n],
             windowing,
             'Patient by patient results. All Efforting',
@@ -1471,7 +1502,7 @@ class ResultsContainer(object):
         )
 
         # PC/PRVC only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['all_pressure_only'][self.window_n],
             windowing,
             'Patient by patient results. PC/PRVC only',
@@ -1481,10 +1512,10 @@ class ResultsContainer(object):
         )
 
         if show_boxplots:
-            self.plot_algo_mad_std_boxplots(self.pp_frames['all_pressure_only'][self.window_n], algos_in_order, windowing, 'pressure_only_pbp')
+            self.plot_algo_mad_std_boxplots(self.pp_frames['all_pressure_only'][self.window_n], windowing, 'pressure_only_pbp')
 
         # Artifacts only
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['artifacts'][self.window_n],
             windowing,
             'Patient by patient results. Artifacts only',
@@ -1494,7 +1525,7 @@ class ResultsContainer(object):
         )
 
         # group asynchronies/artifacts by mode
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             self.pp_frames['all_pressure_only_async'][self.window_n],
             windowing,
             'Patient by patient results. Pressure Mode Asynchronies only',
@@ -1560,7 +1591,7 @@ class ResultsContainer(object):
         plt.show()
 
         pp_custom = self.analyze_per_patient_df(patient_df)
-        mad_std, algos_in_order = self.plot_algo_scatter(
+        self.plot_algo_scatter(
             pp_custom,
             None,
             'Patient {}. Custom plot'.format(patient),

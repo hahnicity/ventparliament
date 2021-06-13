@@ -409,10 +409,9 @@ class TestResultsContainer(object):
         self.test_con.calc_async_index(self.test_con.proc_results)
         r = self.test_con.proc_results
         pp_all = self.test_con.analyze_per_patient_df(r)
-        mad_std, algos = self.test_con.preprocess_mad_std_in_df(pp_all, None)
+        mad_std = self.test_con.preprocess_mad_std_in_df(pp_all, None)
 
         assert len(mad_std) == 2
-        assert_list_equal(algos, ['iipr', 'vicario_nieap'])
         mads = pp_all[pp_all.algo == 'iipr']['mad_pt']
         assert (mad_std['iipr'][0]==mads[~mads.isna()]).all()
         mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_pt']
@@ -438,10 +437,9 @@ class TestResultsContainer(object):
         self.test_con.calc_async_index(self.test_con.proc_results)
         r = self.test_con.proc_results
         pp_all = self.test_con.analyze_per_patient_df(r)
-        mad_std, algos = self.test_con.preprocess_mad_std_in_df(pp_all, 'wmd')
+        mad_std = self.test_con.preprocess_mad_std_in_df(pp_all, 'wmd')
 
         assert len(mad_std) == 2
-        assert_list_equal(algos, ['iipr', 'vicario_nieap'])
         mads = pp_all[pp_all.algo == 'iipr']['mad_wmd']
         assert (mad_std['iipr'][0]==mads[~mads.isna()]).all()
         mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_wmd']
@@ -467,10 +465,9 @@ class TestResultsContainer(object):
         self.test_con.calc_async_index(self.test_con.proc_results)
         r = self.test_con.proc_results
         pp_all = self.test_con.analyze_per_patient_df(r)
-        mad_std, algos = self.test_con.preprocess_mad_std_in_df(pp_all, 'smd')
+        mad_std = self.test_con.preprocess_mad_std_in_df(pp_all, 'smd')
 
         assert len(mad_std) == 2
-        assert_list_equal(algos, ['iipr', 'vicario_nieap'])
         mads = pp_all[pp_all.algo == 'iipr']['mad_smd']
         assert (mad_std['iipr'][0]==mads[~mads.isna()]).all()
         mads = pp_all[pp_all.algo == 'vicario_nieap']['mad_smd']
