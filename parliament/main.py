@@ -899,19 +899,24 @@ class ResultsContainer(object):
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(name_mapping[windowing1], name_mapping[windowing2])
         self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
-    def extract_medians_and_iqr(self, df):
+    def extract_medians_and_iqr(self, df, windowing):
         """
         Extract median/IQR/std vals from a DataFrame for algorithm diffs. Is used in breath
         by breath plotting and table outputs
 
         :param df: should be a breath by breath DataFrame. Can have a mask applied if needed
+        :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
         """
+        if windowing in ['smd', 'wmd']:
+            diff_colname_suffix = '_{}_{}'.format(windowing, self.window_n)
+        else:
+            diff_colname_suffix = '_diff'
         algos_in_frame = set(df.columns).intersection(self.algos_used)
-        sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
+        sorted_diff_cols = sorted([algo+diff_colname_suffix for algo in algos_in_frame])
         frame = df[sorted_diff_cols]
         rows = []
         for col in frame.columns:
-            rows.append([col.replace('_diff', '')] + list(self._bootstrap(frame[col].values)))
+            rows.append([col.replace(diff_colname_suffix, '')] + list(self._bootstrap(frame[col].values)))
         proc = pd.DataFrame(rows, columns=['algo', 'medians', 'iqr_low', 'iqr_high'])
         stds = frame.std(skipna=True, ddof=0).values
         proc['stds'] = stds
@@ -1162,12 +1167,14 @@ class ResultsContainer(object):
         ax.set_ylim(-.4, 31)
         fig.savefig(self.results_dir.joinpath('{}_std_windowing_{}_boxplot_result.png'.format(windowing, figname_prefix)).resolve(), dpi=self.dpi)
 
-    def show_individual_breath_by_breath_frame_results(self, df, figname):
+    def show_individual_breath_by_breath_frame_results(self, df, figname, windowing):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
-        # XXX add windowing option
         algos_in_frame = set(df.columns).intersection(self.algos_used)
-        sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
-        proc_frame = self.extract_medians_and_iqr(df)
+        if windowing is None:
+            sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
+        else:
+            sorted_diff_cols = sorted(["{}_{}_{}".format(algo, windowing, self.window_n) for algo in algos_in_frame])
+        proc_frame = self.extract_medians_and_iqr(df, windowing)
 
         # alphabetical order again
         algos_in_order = sorted(list(proc_frame.algo.unique()))
@@ -1334,84 +1341,103 @@ class ResultsContainer(object):
         """
         self._perform_single_window_analysis(self.proc_results, absolute, winsorizor, algos, robust, robust_and_reg, show_median)
 
-    def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[]):
+    def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[], windowing=None):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
         exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
-            'breath_by_breath_results.png'
+            'breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_async'][self.window_n], only_patient), exclude_cols),
-            'no_async_breath_by_breath_results.png'
+            'no_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only'][self.window_n], only_patient), exclude_cols),
-            'vc_only_breath_by_breath_results.png'
+            'vc_only_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_no_async'][self.window_n], only_patient), exclude_cols),
-            'vc_no_async_breath_by_breath_results.png'
+            'vc_no_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only_async'][self.window_n], only_patient), exclude_cols),
-            'vc_only_async_breath_by_breath_results.png'
+            'vc_only_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only'][self.window_n], only_patient), exclude_cols),
-            'pc_only_breath_by_breath_results.png'
+            'pc_only_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_no_async'][self.window_n], only_patient), exclude_cols),
-            'pc_no_async_breath_by_breath_results.png'
+            'pc_no_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only_async'][self.window_n], only_patient), exclude_cols),
-            'pc_only_async_breath_by_breath_results.png'
+            'pc_only_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only'][self.window_n], only_patient), exclude_cols),
-            'prvc_only_breath_by_breath_results.png'
+            'prvc_only_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_no_async'][self.window_n], only_patient), exclude_cols),
-            'prvc_no_async_breath_by_breath_results.png'
+            'prvc_no_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only_async'][self.window_n], only_patient), exclude_cols),
-            'prvc_only_async_breath_by_breath_results.png'
+            'prvc_only_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_efforting'][self.window_n], only_patient), exclude_cols),
-            'no_efforting_breath_by_breath_results.png'
+            'no_efforting_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['early_efforting'][self.window_n], only_patient), exclude_cols),
-            'early_efforting_breath_by_breath_results.png'
+            'early_efforting_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['insp_efforting'][self.window_n], only_patient), exclude_cols),
-            'insp_efforting_breath_by_breath_results.png'
+            'insp_efforting_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['exp_efforting'][self.window_n], only_patient), exclude_cols),
-            'exp_efforting_breath_by_breath_results.png'
+            'exp_efforting_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_efforting'][self.window_n], only_patient), exclude_cols),
-            'all_efforting_breath_by_breath_results.png'
+            'all_efforting_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only'][self.window_n], only_patient), exclude_cols),
-            'pc_prvc_breath_by_breath_results.png'
+            'pc_prvc_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_no_async'][self.window_n], only_patient), exclude_cols),
-            'pc_prvc_no_async_breath_by_breath_results.png'
+            'pc_prvc_no_async_breath_by_breath_results.png',
+            windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only_async'][self.window_n], only_patient), exclude_cols),
-            'pc_prvc_only_async_breath_by_breath_results.png'
+            'pc_prvc_only_async_breath_by_breath_results.png',
+            windowing,
         )
 
     def plot_per_patient_results(self, windowing, individual_patients=False, show_boxplots=True, std_lim=None):
