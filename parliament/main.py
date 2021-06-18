@@ -150,6 +150,33 @@ class ResultsContainer(object):
         td.insert(0, soup.new_tag('b'))
         td.b.string = val
 
+    def _create_comparison_frames(self, ad_std1, ad_std2, hue_colname, hue1, hue2):
+        ad_rows = []
+        for algo, items in ad_std1.items():
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            for val in items[0]:
+                ad_rows.append([algo_name, val, hue1])
+
+        for algo, items in ad_std2.items():
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            for val in items[0]:
+                ad_rows.append([algo_name, val, hue2])
+
+        # create frame for std.
+        std_rows = []
+        for algo, items in ad_std1.items():
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            for val in items[1]:
+                std_rows.append([algo_name, val, hue1])
+
+        for algo, items in ad_std2.items():
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            for val in items[1]:
+                std_rows.append([algo_name, val, hue2])
+        ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', hue_colname])
+        std_df = pd.DataFrame(std_rows, columns=['Algorithm', 'Standard Deviation', hue_colname])
+        return ad_df, std_df
+
     def _get_windowing_colnames(self, windowing):
         if windowing is None:
             ad_col = 'ad_pt'
@@ -706,6 +733,35 @@ class ResultsContainer(object):
                 # will do no real good to inform the actual implementation science.
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
 
+    def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing):
+        """
+        Compare results of different masks to each other on patient by patient basis.
+        Plot results out with bar chart.
+
+        :param mask1_name: mask name based on masks obtained from `get_masks`
+        :param mask2_name: mask name based on masks obtained from `get_masks`
+        :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        """
+        masks = self.get_masks()
+        mask1 = masks[mask1_name]
+        mask2 = masks[mask2_name]
+
+        pp1 = self.analyze_per_patient_df(self.proc_results[mask1])
+        pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
+
+        ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing)
+        ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing)
+
+        ad_df, std_df = self._create_comparison_frames(ad_std1, ad_std2, 'Breath Types', mask1_name, mask2_name)
+
+        fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3*8, 3*3))
+        sns.barplot(x='Algorithm', y='Absolute Difference', hue='Breath Types', data=ad_df, ax=axes[0])
+        sns.barplot(x='Algorithm', y='Standard Deviation', hue='Breath Types', data=std_df, ax=axes[1])
+
+        for ax in axes:
+            xtick_names = plt.setp(ax, xticklabels=sorted(ad_df.Algorithm.unique()))
+            plt.setp(xtick_names, rotation=90)
+
     def compare_patient_level_masks_scatter(self, mask1_name, mask2_name, windowing, individual_patients=False, std_lim=None):
         """
         Compare results of different masks to each other on patient by patient basis.
@@ -787,17 +843,13 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
         plt.show(fig)
 
-    def compare_window_strategies_bar(self, windowing1, windowing2, individual_patients=False, std_lim=None):
+    def compare_window_strategies_bar(self, windowing1, windowing2):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts.
 
         :param windowing1: window type to use first ('wmd', 'smd', or None)
         :param windowing2: window type to use second ('wmd', 'smd', or None)
-        :param individual_patients: show individual_patients scatter points
-        :param std_lim: limit graphs by standard deviation within certain
-                        factor. Normally is set to None (no limit). But can be
-                        set to any floating value > 0.
         """
         pp = self.analyze_per_patient_df(self.proc_results)
 
@@ -810,37 +862,8 @@ class ResultsContainer(object):
 
         fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3*8, 3*3))
         # create frame for absolute diff
-        ad_rows = []
-        for algo, items in ad_std1.items():
-            # XXX currently the full names are too long to be placed on rotation.
-            # Maybe changing the rotation is best??
-            algo_name = FileCalculations.shorthand_name_mapping[algo]
-            #algo_name = algo
-            for val in items[0]:
-                ad_rows.append([algo_name, val, win1])
+        ad_df, std_df = self._create_comparison_frames(ad_std1, ad_std2, 'Window Strategy', win1, win2)
 
-        for algo, items in ad_std2.items():
-            algo_name = FileCalculations.shorthand_name_mapping[algo]
-            #algo_name = algo
-            for val in items[0]:
-                ad_rows.append([algo_name, val, win2])
-
-        # create frame for std.
-        std_rows = []
-        for algo, items in ad_std1.items():
-            algo_name = FileCalculations.shorthand_name_mapping[algo]
-            #algo_name = algo
-            for val in items[1]:
-                std_rows.append([algo_name, val, win1])
-
-        for algo, items in ad_std2.items():
-            algo_name = FileCalculations.shorthand_name_mapping[algo]
-            #algo_name = algo
-            for val in items[1]:
-                std_rows.append([algo_name, val, win2])
-
-        ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', 'Window Strategy'])
-        std_df = pd.DataFrame(std_rows, columns=['Algorithm', 'Standard Deviation', 'Window Strategy'])
         sns.barplot(x='Algorithm', y='Absolute Difference', hue='Window Strategy', data=ad_df, ax=axes[0])
         sns.barplot(x='Algorithm', y='Standard Deviation', hue='Window Strategy', data=std_df, ax=axes[1])
 
