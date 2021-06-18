@@ -706,7 +706,7 @@ class ResultsContainer(object):
                 # will do no real good to inform the actual implementation science.
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
 
-    def compare_patient_level_masks(self, mask1_name, mask2_name, windowing, individual_patients=False, std_lim=None):
+    def compare_patient_level_masks_scatter(self, mask1_name, mask2_name, windowing, individual_patients=False, std_lim=None):
         """
         Compare results of different masks to each other on patient by patient basis.
         Plot results out with scatter plots as usual.
@@ -787,7 +787,68 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
         plt.show(fig)
 
-    def compare_window_strategies(self, windowing1, windowing2, individual_patients=False, std_lim=None):
+    def compare_window_strategies_bar(self, windowing1, windowing2, individual_patients=False, std_lim=None):
+        """
+        Compare results of different window types to each other on patient by patient basis.
+        Plot results out with bar charts.
+
+        :param windowing1: window type to use first ('wmd', 'smd', or None)
+        :param windowing2: window type to use second ('wmd', 'smd', or None)
+        :param individual_patients: show individual_patients scatter points
+        :param std_lim: limit graphs by standard deviation within certain
+                        factor. Normally is set to None (no limit). But can be
+                        set to any floating value > 0.
+        """
+        pp = self.analyze_per_patient_df(self.proc_results)
+
+        ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1)
+        ad_std2 = self.preprocess_ad_std_in_df(pp, windowing2)
+
+        window_names = {None: 'No windowing', 'wmd': 'WMD', 'smd': 'SMD'}
+        win1 = window_names[windowing1]
+        win2 = window_names[windowing2]
+
+        fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3*8, 3*3))
+        # create frame for absolute diff
+        ad_rows = []
+        for algo, items in ad_std1.items():
+            # XXX currently the full names are too long to be placed on rotation.
+            # Maybe changing the rotation is best??
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            #algo_name = algo
+            for val in items[0]:
+                ad_rows.append([algo_name, val, win1])
+
+        for algo, items in ad_std2.items():
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            #algo_name = algo
+            for val in items[0]:
+                ad_rows.append([algo_name, val, win2])
+
+        # create frame for std.
+        std_rows = []
+        for algo, items in ad_std1.items():
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            #algo_name = algo
+            for val in items[1]:
+                std_rows.append([algo_name, val, win1])
+
+        for algo, items in ad_std2.items():
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            #algo_name = algo
+            for val in items[1]:
+                std_rows.append([algo_name, val, win2])
+
+        ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', 'Window Strategy'])
+        std_df = pd.DataFrame(std_rows, columns=['Algorithm', 'Standard Deviation', 'Window Strategy'])
+        sns.barplot(x='Algorithm', y='Absolute Difference', hue='Window Strategy', data=ad_df, ax=axes[0])
+        sns.barplot(x='Algorithm', y='Standard Deviation', hue='Window Strategy', data=std_df, ax=axes[1])
+
+        for ax in axes:
+            xtick_names = plt.setp(ax, xticklabels=sorted(ad_df.Algorithm.unique()))
+            plt.setp(xtick_names, rotation=90)
+
+    def compare_window_strategies_scatter(self, windowing1, windowing2, individual_patients=False, std_lim=None):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with scatter plots as usual.

@@ -50,6 +50,23 @@ class FileCalculations(object):
         'vicario_co': 'Vicario Constrained Optimization',
         'vicario_nieap': 'Vicario Non-Invasive Estimation of Alveolar Pressure',
     }
+    shorthand_name_mapping = {
+        'al_rawas': 'Al-Rawas',
+        'ft_insp_lstsq': 'Flow Insp Least Sq',
+        'howe_lstsq': "Howe",
+        'iimipr': 'IIMIPR',
+        'iipr': 'IIPR',
+        'iipredator': 'IIPredator',
+        'kannangara': 'Kannangara',
+        'major': "Major",
+        'mipr': 'MIPR',
+        'polynomial': 'Polynomial',
+        'predator': 'PREDATOR',
+        'pt_exp_lstsq': 'Pressure Exp Least Sq',
+        'pt_insp_lstsq': 'Pressure Insp Least Sq',
+        'vicario_co': 'Constrained Optim',
+        'vicario_nieap': 'Vicario Non-Inv Estim',
+    }
     # pt exp least squares algos are available for pc/prvc because pressure
     # should theoretically operate similarly between different modes during
     # expiration
