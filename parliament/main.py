@@ -422,7 +422,6 @@ class ResultsContainer(object):
 
         soup = BeautifulSoup(table.get_html_string())
         min_median = np.nanargmin(abs(medians))
-        # XXX in the future we should revisit this before publication
         min_iqr_rel_to_0 = np.nanargmin(abs(np.array([iqr_low, iqr_high]).T).sum(axis=1))
         min_std = np.nanargmin(stds)
         # the +1 is because the header is embedded in a <tr> element
@@ -759,8 +758,10 @@ class ResultsContainer(object):
         sns.barplot(x='Algorithm', y='Standard Deviation', hue='Breath Types', data=std_df, ax=axes[1])
 
         for ax in axes:
-            xtick_names = plt.setp(ax, xticklabels=sorted(ad_df.Algorithm.unique()))
+            xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
             plt.setp(xtick_names, rotation=90)
+        figname = str(self.results_dir.joinpath('compare-patient-level-masks-bar-{}-{}-windowing-{}.png'.format(mask1_name, mask2_name, windowing)).resolve())
+        plt.savefig(figname, dpi=self.dpi)
 
     def compare_patient_level_masks_scatter(self, mask1_name, mask2_name, windowing, individual_patients=False, std_lim=None):
         """
@@ -791,21 +792,26 @@ class ResultsContainer(object):
                 ad_std[algo][i] = ad_std2[algo][i] - ad_std1[algo][i]
 
         plt_title = '{} vs {}'.format(mask1_name, mask2_name)
-        figname = '{}_vs_{}.png'.format(mask1_name, mask2_name)
+        figname = '{}_vs_{}-scatter-windowing-{}.png'.format(mask1_name, mask2_name, windowing)
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(mask1_name, mask2_name)
         ylabel = 'Standard Deviation ($\sigma$) of Algo'
         self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
-    def compare_breath_level_masks(self, mask1_name, mask2_name, figname='custom_breath_by_breath.png'):
+    def compare_breath_level_masks(self, mask1_name, mask2_name, windowing):
         """
         Compare results of different masks to each other on breath by breath results.
 
         :param mask1_name: mask name based on masks obtained from `get_masks`
         :param mask2_name: mask name based on masks obtained from `get_masks`
-        :param figname: figure name to save
+        :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
         """
         algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used)
-        sorted_diff_cols = sorted(["{}_diff".format(algo) for algo in algos_in_frame])
+        if windowing in ['smd', 'wmd']:
+            diff_colname_suffix = '_{}_{}'.format(windowing, self.window_n)
+        else:
+            diff_colname_suffix = '_diff'
+        sorted_diff_cols = sorted(["{}{}".format(algo, diff_colname_suffix) for algo in algos_in_frame])
+        figname = str(self.results_dir.joinpath('compare-breath-masks-{}-{}-windowing-{}.png'.format(mask1_name, mask2_name, windowing)).resolve())
 
         masks = self.get_masks()
         mask1 = masks[mask1_name]
@@ -820,10 +826,9 @@ class ResultsContainer(object):
         df = df.rename(columns={'variable': 'algo'})
 
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
-        # XXX add windowing options
 
         # alphabetical order again
-        algos_in_order = sorted([algo.replace('_diff', '') for algo in sorted_diff_cols])
+        algos_in_order = sorted([algo.replace(diff_colname_suffix, '') for algo in sorted_diff_cols])
         sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=self.boot_resamples, showfliers=False, palette='Set2')
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
         plt.setp(xtick_names, rotation=60, fontsize=14)
@@ -832,21 +837,22 @@ class ResultsContainer(object):
         ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.legend(fontsize=16)
-        title = figname.replace('.png', '').replace('_', ' ')
+        title = '{} vs {}'.format(mask1_name, mask2_name)
         ax.set_title(title, fontsize=20)
-        fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
-        proc_frame = self.extract_medians_and_iqr(orig_bb1)
+        proc_frame = self.extract_medians_and_iqr(orig_bb1, windowing)
         self._show_breath_by_breath_algo_table(proc_frame, mask1_name)
 
-        proc_frame = self.extract_medians_and_iqr(orig_bb2)
+        proc_frame = self.extract_medians_and_iqr(orig_bb2, windowing)
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
+        plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
     def compare_window_strategies_bar(self, windowing1, windowing2):
         """
         Compare results of different window types to each other on patient by patient basis.
-        Plot results out with bar charts.
+        Plot results out with bar charts. Confidence intervals here tend to be quite
+        wide because our current n is 18. Future work can improve upon this number.
 
         :param windowing1: window type to use first ('wmd', 'smd', or None)
         :param windowing2: window type to use second ('wmd', 'smd', or None)
@@ -868,8 +874,10 @@ class ResultsContainer(object):
         sns.barplot(x='Algorithm', y='Standard Deviation', hue='Window Strategy', data=std_df, ax=axes[1])
 
         for ax in axes:
-            xtick_names = plt.setp(ax, xticklabels=sorted(ad_df.Algorithm.unique()))
+            xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
             plt.setp(xtick_names, rotation=90)
+        figname = str(self.results_dir.joinpath('compare-window-strats-bar-{}-{}.png'.format(win1, win2)).resolve())
+        plt.savefig(figname, dpi=self.dpi)
 
     def compare_window_strategies_scatter(self, windowing1, windowing2, individual_patients=False, std_lim=None):
         """
@@ -895,7 +903,7 @@ class ResultsContainer(object):
 
         name_mapping = {'smd': 'SMD', 'wmd': 'WMD', None: 'No Windowing'}
         plt_title = '{} vs {}'.format(name_mapping[windowing1], name_mapping[windowing2])
-        figname = '{}_vs_{}.png'.format(windowing1, windowing2)
+        figname = '{}_vs_{}-scatter.png'.format(windowing1, windowing2)
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(name_mapping[windowing1], name_mapping[windowing2])
         self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
@@ -1200,7 +1208,7 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(proc_frame, title)
         plt.show(fig)
 
-    def perform_algo_based_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), algos=[]):
+    def perform_algo_based_multi_window_analysis_regression(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), algos=[]):
         """
         Perform multi-window analysis but centered on how algorithms differ by window
         instead of how windows differ by algorithm. Basically we're doing a sensitivity
@@ -1254,16 +1262,17 @@ class ResultsContainer(object):
                     axes[i][j].set_ylim((min_, y_max+5))
 
             plt.suptitle('Window Size {}'.format(size), fontsize=28, y=.9)
+            fig.savefig(self.results_dir.joinpath('algo_based_multi_window_analysis_regression.png').resolve(), dpi=self.dpi)
             plt.show(fig)
 
-    def perform_multi_window_analysis(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), robust=False):
+    def perform_multi_window_analysis_regression(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), robust=False):
         """
         Show insights from analyzing multiple different window sizes for different
         algorithms.
 
         :param absolute: return absolute values for WMD calcs
         :param windows: list of window sizes to use
-        ;param winsorizor: (<low>, 1-<high>) percentiles to choose
+        :param winsorizor: (<low>, 1-<high>) percentiles to choose
         :param robust: (bool) is robust regression or not
         """
         # for now just run some of the least squares algos
@@ -1303,7 +1312,47 @@ class ResultsContainer(object):
                     axes[i][j].set_ylim((min_, y_max+5))
 
             plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28, y=.9)
+            fig.savefig(self.results_dir.joinpath('{}_multi_window_analysis_regression.png'.format(algo)).resolve(), dpi=self.dpi)
             plt.show(fig)
+
+    def perform_multi_window_analysis_bar(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], windowing='smd'):
+        """
+        Show insights from analyzing multiple different window sizes for different
+        algorithms.
+
+        :param absolute: return absolute values for WMD calcs
+        :param windows: list of window sizes to use
+        :param windowing: 'wmd' for WMD, and 'smd' for SMD
+        """
+        if windowing not in ['wmd', 'smd']:
+            raise ValueError('Must specify a valid window strategy. choices: wmd OR smd')
+        for win_size in windows:
+            self.set_new_window_n(win_size)
+
+        super_frame = None
+        fig, ax = plt.subplots(figsize=(3*8, 4*3))
+        for size in windows:
+            cols = ['{}_{}_{}'.format(algo, windowing, size) for algo in self.algos_used]
+            if absolute:
+                frame = self.proc_results[cols].abs()
+            else:
+                frame = self.proc_results[cols]
+            rename_cols = {col: col.replace('_{}_{}'.format(windowing, size), '') for col in cols}
+            frame = frame.rename(columns=rename_cols)
+            frame = frame.melt()
+            frame['Window Size'] = size
+            if super_frame is None:
+                super_frame = frame
+            else:
+                super_frame = super_frame.append(frame)
+
+        sns.barplot(x='variable', y='value', data=super_frame, hue='Window Size')
+        plt.ylabel('{}Difference (Algo - Compliance)'.format('Absolute ' if absolute else ''))
+        plt.xlabel('Algorithm')
+        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
+        plt.setp(xtick_names, rotation=90)
+        fig.savefig(self.results_dir.joinpath('multi_window_analysis_bar.png').resolve(), dpi=self.dpi)
+        plt.show(fig)
 
     def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05), algos=[], robust=False, robust_and_reg=False, show_median=False):
         """
@@ -1344,99 +1393,100 @@ class ResultsContainer(object):
     def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[], windowing=None):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
         exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
+        windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}.png'.format(y))
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
-            'breath_by_breath_results.png',
+            windowing_mod('breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_async'][self.window_n], only_patient), exclude_cols),
-            'no_async_breath_by_breath_results.png',
+            windowing_mod('no_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only'][self.window_n], only_patient), exclude_cols),
-            'vc_only_breath_by_breath_results.png',
+            windowing_mod('vc_only_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_no_async'][self.window_n], only_patient), exclude_cols),
-            'vc_no_async_breath_by_breath_results.png',
+            windowing_mod('vc_no_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only_async'][self.window_n], only_patient), exclude_cols),
-            'vc_only_async_breath_by_breath_results.png',
+            windowing_mod('vc_only_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only'][self.window_n], only_patient), exclude_cols),
-            'pc_only_breath_by_breath_results.png',
+            windowing_mod('pc_only_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_no_async'][self.window_n], only_patient), exclude_cols),
-            'pc_no_async_breath_by_breath_results.png',
+            windowing_mod('pc_no_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only_async'][self.window_n], only_patient), exclude_cols),
-            'pc_only_async_breath_by_breath_results.png',
+            windowing_mod('pc_only_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only'][self.window_n], only_patient), exclude_cols),
-            'prvc_only_breath_by_breath_results.png',
+            windowing_mod('prvc_only_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_no_async'][self.window_n], only_patient), exclude_cols),
-            'prvc_no_async_breath_by_breath_results.png',
+            windowing_mod('prvc_no_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only_async'][self.window_n], only_patient), exclude_cols),
-            'prvc_only_async_breath_by_breath_results.png',
+            windowing_mod('prvc_only_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_efforting'][self.window_n], only_patient), exclude_cols),
-            'no_efforting_breath_by_breath_results.png',
+            windowing_mod('no_efforting_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['early_efforting'][self.window_n], only_patient), exclude_cols),
-            'early_efforting_breath_by_breath_results.png',
+            windowing_mod('early_efforting_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['insp_efforting'][self.window_n], only_patient), exclude_cols),
-            'insp_efforting_breath_by_breath_results.png',
+            windowing_mod('insp_efforting_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['exp_efforting'][self.window_n], only_patient), exclude_cols),
-            'exp_efforting_breath_by_breath_results.png',
+            windowing_mod('exp_efforting_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_efforting'][self.window_n], only_patient), exclude_cols),
-            'all_efforting_breath_by_breath_results.png',
+            windowing_mod('all_efforting_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only'][self.window_n], only_patient), exclude_cols),
-            'pc_prvc_breath_by_breath_results.png',
+            windowing_mod('pc_prvc_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_no_async'][self.window_n], only_patient), exclude_cols),
-            'pc_prvc_no_async_breath_by_breath_results.png',
+            windowing_mod('pc_prvc_no_async_breath_by_breath_results.png', windowing),
             windowing,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only_async'][self.window_n], only_patient), exclude_cols),
-            'pc_prvc_only_async_breath_by_breath_results.png',
+            windowing_mod('pc_prvc_only_async_breath_by_breath_results.png', windowing),
             windowing,
         )
 
@@ -1451,12 +1501,13 @@ class ResultsContainer(object):
                         factor. Normally is set to None (no limit). But can be
                         set to any floating value > 0.
         """
+        windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}.png'.format(y))
         # Patient by Patient. All breathing
         self.plot_algo_scatter(
             self.pp_frames['all'][self.window_n],
             windowing,
             'Patient by patient results. No filters',
-            'patient_by_patient_result.png',
+            windowing_mod('patient_by_patient_result.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1468,7 +1519,7 @@ class ResultsContainer(object):
             self.pp_frames['no_async'][self.window_n],
             windowing,
             'Patient by patient results. No Asynchronies',
-            'patient_by_patient_no_async_result.png',
+            windowing_mod('patient_by_patient_no_async_result.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1480,7 +1531,7 @@ class ResultsContainer(object):
             self.pp_frames['async'][self.window_n],
             windowing,
             'Patient by patient results. Asynchronies only',
-            'patient_by_patient_asynchronies_only.png',
+            windowing_mod('patient_by_patient_asynchronies_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1492,7 +1543,7 @@ class ResultsContainer(object):
             self.pp_frames['vc_only'][self.window_n],
             windowing,
             'Patient by patient results. VC only',
-            'patient_by_patient_vc_only.png',
+            windowing_mod('patient_by_patient_vc_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1504,7 +1555,7 @@ class ResultsContainer(object):
             self.pp_frames['vc_no_async'][self.window_n],
             windowing,
             'Patient by patient results. VC, No Asynchronies',
-            'patient_by_patient_vc_no_asynchronies.png',
+            windowing_mod('patient_by_patient_vc_no_asynchronies.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1514,7 +1565,7 @@ class ResultsContainer(object):
             self.pp_frames['vc_only_async'][self.window_n],
             windowing,
             'Patient by patient results. VC Asynchronies only',
-            'patient_by_patient_vc_asynchronies_only.png',
+            windowing_mod('patient_by_patient_vc_asynchronies_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1524,7 +1575,7 @@ class ResultsContainer(object):
             self.pp_frames['pc_only'][self.window_n],
             windowing,
             'Patient by patient results. PC only',
-            'patient_by_patient_pc_only.png',
+            windowing_mod('patient_by_patient_pc_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1536,7 +1587,7 @@ class ResultsContainer(object):
             self.pp_frames['pc_no_async'][self.window_n],
             windowing,
             'Patient by patient results. PC, No Asynchronies',
-            'patient_by_patient_pc_no_asynchronies.png',
+            windowing_mod('patient_by_patient_pc_no_asynchronies.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1546,7 +1597,7 @@ class ResultsContainer(object):
             self.pp_frames['pc_only_async'][self.window_n],
             windowing,
             'Patient by patient results. PC Asynchronies only',
-            'patient_by_patient_pc_asynchronies_only.png',
+            windowing_mod('patient_by_patient_pc_asynchronies_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1556,7 +1607,7 @@ class ResultsContainer(object):
             self.pp_frames['prvc_only'][self.window_n],
             windowing,
             'Patient by patient results. PRVC only',
-            'patient_by_patient_prvc_only.png',
+            windowing_mod('patient_by_patient_prvc_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1568,7 +1619,7 @@ class ResultsContainer(object):
             self.pp_frames['prvc_no_async'][self.window_n],
             windowing,
             'Patient by patient results. PRVC, No Asynchronies',
-            'patient_by_patient_prvc_no_asynchronies.png',
+            windowing_mod('patient_by_patient_prvc_no_asynchronies.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1578,7 +1629,7 @@ class ResultsContainer(object):
             self.pp_frames['prvc_only_async'][self.window_n],
             windowing,
             'Patient by patient results. PRVC Asynchronies only',
-            'patient_by_patient_prvc_asynchronies_only.png',
+            windowing_mod('patient_by_patient_prvc_asynchronies_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1588,7 +1639,7 @@ class ResultsContainer(object):
             self.pp_frames['no_efforting'][self.window_n],
             windowing,
             'Patient by patient results. No Apparent Efforting',
-            'patient_by_patient_no_efforting.png',
+            windowing_mod('patient_by_patient_no_efforting.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1598,7 +1649,7 @@ class ResultsContainer(object):
             self.pp_frames['early_efforting'][self.window_n],
             windowing,
             'Patient by patient results. Early Efforting',
-            'patient_by_patient_early_efforting.png',
+            windowing_mod('patient_by_patient_early_efforting.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1608,7 +1659,7 @@ class ResultsContainer(object):
             self.pp_frames['insp_efforting'][self.window_n],
             windowing,
             'Patient by patient results. Inspiratory Efforting',
-            'patient_by_patient_insp_efforting.png',
+            windowing_mod('patient_by_patient_insp_efforting.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1618,7 +1669,7 @@ class ResultsContainer(object):
             self.pp_frames['exp_efforting'][self.window_n],
             windowing,
             'Patient by patient results. Expiratory Efforting',
-            'patient_by_patient_exp_efforting.png',
+            windowing_mod('patient_by_patient_exp_efforting.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1628,7 +1679,7 @@ class ResultsContainer(object):
             self.pp_frames['all_efforting'][self.window_n],
             windowing,
             'Patient by patient results. All Efforting',
-            'patient_by_patient_all_efforting.png',
+            windowing_mod('patient_by_patient_all_efforting.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1638,7 +1689,7 @@ class ResultsContainer(object):
             self.pp_frames['all_pressure_only'][self.window_n],
             windowing,
             'Patient by patient results. PC/PRVC only',
-            'patient_by_patient_pc_prvc_only.png',
+            windowing_mod('patient_by_patient_pc_prvc_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1651,7 +1702,7 @@ class ResultsContainer(object):
             self.pp_frames['artifacts'][self.window_n],
             windowing,
             'Patient by patient results. Artifacts only',
-            'patient_by_patient_artifacts_only.png',
+            windowing_mod('patient_by_patient_artifacts_only.png', windowing),
             individual_patients,
             std_lim
         )
@@ -1661,7 +1712,7 @@ class ResultsContainer(object):
             self.pp_frames['all_pressure_only_async'][self.window_n],
             windowing,
             'Patient by patient results. Pressure Mode Asynchronies only',
-            'patient_by_patient_pressure_mode_asynchronies_only.png',
+            windowing_mod('patient_by_patient_pressure_mode_asynchronies_only.png', windowing),
             individual_patients,
             std_lim
         )
