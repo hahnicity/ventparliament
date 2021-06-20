@@ -1351,7 +1351,7 @@ class ResultsContainer(object):
         plt.xlabel('Algorithm')
         xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
         plt.setp(xtick_names, rotation=90)
-        fig.savefig(self.results_dir.joinpath('multi_window_analysis_bar.png').resolve(), dpi=self.dpi)
+        fig.savefig(self.results_dir.joinpath('multi_window_analysis_bar-windowing-{}.png'.format(windowing)).resolve(), dpi=self.dpi)
         plt.show(fig)
 
     def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05), algos=[], robust=False, robust_and_reg=False, show_median=False):
@@ -1748,7 +1748,7 @@ class ResultsContainer(object):
         if not 'asynci_{}'.format(window_n) in self.proc_results.columns:
             self.analyze_results()
 
-    def visualize_patient(self, patient, algos, extra_mask=None, ts_xlim=None, ts_ylim=None):
+    def visualize_patient(self, patient, algos, extra_mask=None, ts_xlim=None, ts_ylim=None, windowing=None):
         if algos == 'all':
             algos = self.algos_used
         algo_cols = algos
@@ -1771,21 +1771,24 @@ class ResultsContainer(object):
             plt.ylim(ts_ylim)
         plt.plot(patient_df.gold_stnd_compliance, label='gt')
         plt.xlabel('DataFrame index')
+        plt.savefig(self.results_dir.joinpath('{}-individual-breath-time-series-plot.png'.format(patient)).resolve(), dpi=self.dpi)
         plt.show()
 
         pp_custom = self.analyze_per_patient_df(patient_df)
         self.plot_algo_scatter(
             pp_custom,
-            None,
+            windowing,
             'Patient {}. Custom plot'.format(patient),
-            '{}_custom_plot.png'.format(patient),
+            '{}_custom_scatter_plot-windowing-{}.png'.format(patient, windowing),
             False,
             None,
         )
 
         # breath by breath results
         self.show_individual_breath_by_breath_frame_results(
-            patient_df, 'pc_prvc_only_async_breath_by_breath_results.png'
+            patient_df,
+            '{}_custom_breath_by_breath-windowing-{}.png'.format(patient, windowing),
+            windowing,
         )
 
 
