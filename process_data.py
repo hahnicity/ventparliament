@@ -111,8 +111,6 @@ class Processing(object):
         if not is_cvc:
             plats = self.get_plats_for_patient(patient_id, rows)
         else:
-            # XXX for cvc data it might be helpful in the future to utilize
-            # measured plat rather than the QuickLung plat setting.
             plats = []
 
         # Step 2: find which breaths that we want to save which are within range

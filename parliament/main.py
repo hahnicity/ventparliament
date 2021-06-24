@@ -7,6 +7,7 @@ Main analysis code
 import argparse
 from copy import copy
 from pathlib import Path
+import re
 import sys
 import traceback
 from warnings import warn
@@ -150,7 +151,7 @@ class ResultsContainer(object):
         td.insert(0, soup.new_tag('b'))
         td.b.string = val
 
-    def _create_comparison_frames(self, ad_std1, ad_std2, hue_colname, hue1, hue2):
+    def _create_per_patient_comparison_frames(self, ad_std1, ad_std2, hue_colname, hue1, hue2):
         ad_rows = []
         for algo, items in ad_std1.items():
             algo_name = FileCalculations.shorthand_name_mapping[algo]
@@ -176,6 +177,14 @@ class ResultsContainer(object):
         ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', hue_colname])
         std_df = pd.DataFrame(std_rows, columns=['Algorithm', 'Standard Deviation', hue_colname])
         return ad_df, std_df
+
+    def _get_windowing_algo_diff_colnames(self, windowing):
+        algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used)
+        if windowing in ['smd', 'wmd']:
+            diff_colname_suffix = '_{}_{}'.format(windowing, self.window_n)
+        else:
+            diff_colname_suffix = '_diff'
+        return sorted(["{}{}".format(algo, diff_colname_suffix) for algo in algos_in_frame])
 
     def _get_windowing_colnames(self, windowing):
         if windowing is None:
@@ -751,7 +760,7 @@ class ResultsContainer(object):
         ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing)
         ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing)
 
-        ad_df, std_df = self._create_comparison_frames(ad_std1, ad_std2, 'Breath Types', mask1_name, mask2_name)
+        ad_df, std_df = self._create_per_patient_comparison_frames(ad_std1, ad_std2, 'Breath Types', mask1_name, mask2_name)
 
         fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3*8, 3*3))
         sns.barplot(x='Algorithm', y='Absolute Difference', hue='Breath Types', data=ad_df, ax=axes[0])
@@ -848,7 +857,59 @@ class ResultsContainer(object):
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
-    def compare_window_strategies_bar(self, windowing1, windowing2):
+    def compare_window_strategies_bar_per_breath(self, windowing1, windowing2):
+        """
+        Compare results of different window types to each other on patient breath by breath basis.
+        Plot results out with bar charts.
+
+        :param windowing1: window type to use first ('wmd', 'smd', or None)
+        :param windowing2: window type to use second ('wmd', 'smd', or None)
+        """
+        sorted_diff_cols1 = self._get_windowing_algo_diff_colnames(windowing1)
+        sorted_diff_cols2 = self._get_windowing_algo_diff_colnames(windowing2)
+        bb1 = self.proc_results[sorted_diff_cols1].abs()
+        bb2 = self.proc_results[sorted_diff_cols2].abs()
+        window_names = {None: 'No windowing', 'wmd': 'WMD', 'smd': 'SMD'}
+        win1 = window_names[windowing1]
+        win2 = window_names[windowing2]
+        # rename cols
+        bb1 = bb1.rename(columns={col: re.sub('(_diff|_(wmd|smd)_\d+)', '', col) for i, col in enumerate(bb1.columns)}).melt()
+        bb2 = bb2.rename(columns={col: re.sub('(_diff|_(wmd|smd)_\d+)', '', col) for i, col in enumerate(bb2.columns)}).melt()
+        bb1['Windowing'] = win1
+        bb2['Windowing'] = win2
+        df = pd.concat([bb1, bb2])
+        df = df.rename(columns={'variable': 'algo'})
+        fig, ax = plt.subplots(figsize=(3*8, 3*3))
+
+        # alphabetical order again
+        algos_in_order = sorted(self.algos_used)
+        sns.barplot(x='algo', y='value', data=df, hue='Windowing', ax=ax, n_boot=self.boot_resamples, palette='Set2')
+        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[i] for i in algos_in_order])
+        plt.setp(xtick_names, rotation=90, fontsize=14)
+        xlim = ax.get_xlim()
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
+        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
+        ax.set_xlabel('Algorithm', fontsize=16)
+        ax.legend(fontsize=16)
+        title = '{} vs {}'.format(win1, win2)
+        ax.set_title(title, fontsize=20)
+
+        # XXX technically the bootstrap can give a different answer than this. So it's
+        # likely necessary to extract the bootstrapped results rather than the post-processed results
+        #
+        # XXX also for this function we're using mean. so median and IQR is a bit misleading.
+        # This is true elsewhere for some of the barplots as well. Need to remove this calc
+        # from here and just replace with mean and confidence.
+        proc_frame = self.extract_medians_and_iqr(self.proc_results, windowing1, absolute=True)
+        self._show_breath_by_breath_algo_table(proc_frame, win1)
+
+        proc_frame = self.extract_medians_and_iqr(self.proc_results, windowing2, absolute=True)
+        self._show_breath_by_breath_algo_table(proc_frame, win2)
+        figname = str(self.results_dir.joinpath('compare-window-strats-bar-per-breath-{}-{}.png'.format(win1, win2)).resolve())
+        plt.savefig(figname, dpi=self.dpi)
+        plt.show(fig)
+
+    def compare_window_strategies_bar_per_patient(self, windowing1, windowing2):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts. Confidence intervals here tend to be quite
@@ -868,10 +929,10 @@ class ResultsContainer(object):
 
         fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3*8, 3*3))
         # create frame for absolute diff
-        ad_df, std_df = self._create_comparison_frames(ad_std1, ad_std2, 'Window Strategy', win1, win2)
+        ad_df, std_df = self._create_per_patient_comparison_frames(ad_std1, ad_std2, 'Window Strategy', win1, win2)
 
-        sns.barplot(x='Algorithm', y='Absolute Difference', hue='Window Strategy', data=ad_df, ax=axes[0])
-        sns.barplot(x='Algorithm', y='Standard Deviation', hue='Window Strategy', data=std_df, ax=axes[1])
+        sns.barplot(x='Algorithm', y='Absolute Difference', hue='Window Strategy', data=ad_df, ax=axes[0], palette='Set2')
+        sns.barplot(x='Algorithm', y='Standard Deviation', hue='Window Strategy', data=std_df, ax=axes[1], palette='Set2')
 
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
@@ -879,7 +940,7 @@ class ResultsContainer(object):
         figname = str(self.results_dir.joinpath('compare-window-strats-bar-{}-{}.png'.format(win1, win2)).resolve())
         plt.savefig(figname, dpi=self.dpi)
 
-    def compare_window_strategies_scatter(self, windowing1, windowing2, individual_patients=False, std_lim=None):
+    def compare_window_strategies_scatter_per_patient(self, windowing1, windowing2, individual_patients=False, std_lim=None):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with scatter plots as usual.
@@ -907,7 +968,7 @@ class ResultsContainer(object):
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(name_mapping[windowing1], name_mapping[windowing2])
         self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
-    def extract_medians_and_iqr(self, df, windowing):
+    def extract_medians_and_iqr(self, df, windowing, absolute=False):
         """
         Extract median/IQR/std vals from a DataFrame for algorithm diffs. Is used in breath
         by breath plotting and table outputs
@@ -921,7 +982,10 @@ class ResultsContainer(object):
             diff_colname_suffix = '_diff'
         algos_in_frame = set(df.columns).intersection(self.algos_used)
         sorted_diff_cols = sorted([algo+diff_colname_suffix for algo in algos_in_frame])
-        frame = df[sorted_diff_cols]
+        if not absolute:
+            frame = df[sorted_diff_cols]
+        else:
+            frame = df[sorted_diff_cols].abs()
         rows = []
         for col in frame.columns:
             rows.append([col.replace(diff_colname_suffix, '')] + list(self._bootstrap(frame[col].values)))
@@ -1262,7 +1326,7 @@ class ResultsContainer(object):
                     axes[i][j].set_ylim((min_, y_max+5))
 
             plt.suptitle('Window Size {}'.format(size), fontsize=28, y=.9)
-            fig.savefig(self.results_dir.joinpath('algo_based_multi_window_analysis_regression.png').resolve(), dpi=self.dpi)
+            fig.savefig(self.results_dir.joinpath('algo_based_multi_window_analysis_regression_size_{}.png'.format(size)).resolve(), dpi=self.dpi)
             plt.show(fig)
 
     def perform_multi_window_analysis_regression(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), robust=False):
