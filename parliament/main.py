@@ -486,10 +486,6 @@ class ResultsContainer(object):
             algos_in_frame = set(df.columns).intersection(self.algos_used)
             for algo in algos_in_frame:
                 row = [patient_id, algo]
-                # pandas divides std by n-1, and numpy divides by n. We really
-                # should be dividing by n here, so thats why we use np.nanstd instead
-                # of using DataFrame.std(skipna=True). Also we weren't using skipna
-                # originally, which was a big error
                 row.append(np.nanmedian(frame['{}_diff'.format(algo, self.window_n)].abs()))
                 row.append(np.nanstd(frame[algo]))
                 row.append(np.nanmedian(frame['{}_wmd_{}'.format(algo, self.window_n)].abs()))
@@ -711,7 +707,7 @@ class ResultsContainer(object):
             # some rows will have multiple plats overlapping with them. we can average the plat
             # get a compliance, plateau pressure, and driving pressure
             for i, row in frame.iterrows():
-                plats_in_range = valid_plats[(valid_plats.abs_bs - pd.Timedelta(hours=0.5) < row.abs_bs) & (row.abs_bs < valid_plats.abs_bs + pd.Timedelta(hours=0.5))]
+                plats_in_range = valid_plats[(valid_plats.abs_bs - pd.Timedelta(hours=0.5) <= row.abs_bs) & (row.abs_bs <= valid_plats.abs_bs + pd.Timedelta(hours=0.5))]
                 proc_results.loc[i, 'gold_stnd_compliance'] = plats_in_range.gold_stnd_compliance.mean()
                 proc_results.loc[i, 'p_plat'] = (proc_results.loc[i, 'tvi']/proc_results.loc[i, 'gold_stnd_compliance']) + proc_results.loc[i, 'peep']
                 proc_results.loc[i, 'p_driving'] = proc_results.loc[i, 'p_plat'] - proc_results.loc[i, 'peep']
