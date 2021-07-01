@@ -257,6 +257,7 @@ class ResultsContainer(object):
         fig.legend(fontsize=16, loc='center right')
         ax.set_title(plt_title, fontsize=20)
         figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-windowing-{}.png'.format(windowing))
+        plt.tight_layout()
         fig.savefig(figname, dpi=self.dpi)
 
         # show table of boxplot results
@@ -281,6 +282,7 @@ class ResultsContainer(object):
 
         display(HTML('<h2>{}</h2>'.format(plt_title)))
         display(HTML(soup.prettify()))
+        plt.tight_layout()
         plt.show(fig)
 
     def _perform_single_window_analysis(self, df, absolute, winsorizor, algos, robust, robust_and_reg, show_median):
@@ -319,6 +321,7 @@ class ResultsContainer(object):
                 axes[i][j].legend(handles, new_labels, fontsize=16)
 
             plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28, y=.9)
+            plt.tight_layout()
             plt.show(fig)
 
     def _regplot_wmd(self, df, algo, x_col, win_size, ax, winsorizor, scatter_kws, line_kws, absolute, robust, robust_and_reg, show_median, show_algo_color=True):
@@ -692,14 +695,18 @@ class ResultsContainer(object):
                 final_index_col = '{}_{}'.format(index_col, self.window_n)
                 df.loc[pt_df.index, final_index_col] = rolling_nan_mean(pt_df[async_cols].any(axis=1).astype(int).values, self.window_n)
 
-    def collate_data(self, algos_used):
+    def collate_data(self, algos_used, n_minutes=30):
         """
         Now that (presumably) all patient results have been tabulated we can finally determine
         what our gold standard compliances are for specific time points. Filter
+
+        :param algos_used: algorithms used in the calculations
+        :param n_minutes: n minutes to find a plateau pressure within range of breath start.
         """
         self.algos_used = algos_used
         self.algo_markers = {algo: self.scatter_marker_symbols[i] for i, algo in enumerate(self.algos_used)}
         self.algo_colors = {algo: cc.cm.glasbey(i) for i, algo in enumerate(self.algos_used)}
+        self.n_minutes = n_minutes
         proc_results = pd.concat(self.raw_results)
         proc_results.index = range(len(proc_results))
         for patient, frame in proc_results.groupby('patient_id'):
@@ -707,7 +714,10 @@ class ResultsContainer(object):
             # some rows will have multiple plats overlapping with them. we can average the plat
             # get a compliance, plateau pressure, and driving pressure
             for i, row in frame.iterrows():
-                plats_in_range = valid_plats[(valid_plats.abs_bs - pd.Timedelta(hours=0.5) <= row.abs_bs) & (row.abs_bs <= valid_plats.abs_bs + pd.Timedelta(hours=0.5))]
+                plats_in_range = valid_plats[
+                    (valid_plats.abs_bs - pd.Timedelta(minutes=n_minutes) <= row.abs_bs) &
+                    (row.abs_bs <= valid_plats.abs_bs + pd.Timedelta(minutes=n_minutes))
+                ]
                 proc_results.loc[i, 'gold_stnd_compliance'] = plats_in_range.gold_stnd_compliance.mean()
                 proc_results.loc[i, 'p_plat'] = (proc_results.loc[i, 'tvi']/proc_results.loc[i, 'gold_stnd_compliance']) + proc_results.loc[i, 'peep']
                 proc_results.loc[i, 'p_driving'] = proc_results.loc[i, 'p_plat'] - proc_results.loc[i, 'peep']
@@ -765,7 +775,8 @@ class ResultsContainer(object):
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
             plt.setp(xtick_names, rotation=90)
-        figname = str(self.results_dir.joinpath('compare-patient-level-masks-bar-{}-{}-windowing-{}.png'.format(mask1_name, mask2_name, windowing)).resolve())
+        figname = str(self.results_dir.joinpath('compare-patient-level-masks-bar-{}-{}-windowing-{}-mins-{}.png'.format(mask1_name, mask2_name, windowing, self.n_minutes)).resolve())
+        plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
     def compare_patient_level_masks_scatter(self, mask1_name, mask2_name, windowing, individual_patients=False, std_lim=None):
@@ -797,7 +808,7 @@ class ResultsContainer(object):
                 ad_std[algo][i] = ad_std2[algo][i] - ad_std1[algo][i]
 
         plt_title = '{} vs {}'.format(mask1_name, mask2_name)
-        figname = '{}_vs_{}-scatter-windowing-{}.png'.format(mask1_name, mask2_name, windowing)
+        figname = '{}_vs_{}-scatter-windowing-{}-mins-{}.png'.format(mask1_name, mask2_name, windowing, self.n_minutes)
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(mask1_name, mask2_name)
         ylabel = 'Standard Deviation ($\sigma$) of Algo'
         self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
@@ -816,7 +827,7 @@ class ResultsContainer(object):
         else:
             diff_colname_suffix = '_diff'
         sorted_diff_cols = sorted(["{}{}".format(algo, diff_colname_suffix) for algo in algos_in_frame])
-        figname = str(self.results_dir.joinpath('compare-breath-masks-{}-{}-windowing-{}.png'.format(mask1_name, mask2_name, windowing)).resolve())
+        figname = str(self.results_dir.joinpath('compare-breath-masks-{}-{}-windowing-{}-mins-{}.png'.format(mask1_name, mask2_name, windowing, self.n_minutes)).resolve())
 
         masks = self.get_masks()
         mask1 = masks[mask1_name]
@@ -850,6 +861,7 @@ class ResultsContainer(object):
 
         proc_frame = self.extract_medians_and_iqr(orig_bb2, windowing)
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
+        plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
@@ -901,7 +913,8 @@ class ResultsContainer(object):
 
         proc_frame = self.extract_medians_and_iqr(self.proc_results, windowing2, absolute=True)
         self._show_breath_by_breath_algo_table(proc_frame, win2)
-        figname = str(self.results_dir.joinpath('compare-window-strats-bar-per-breath-{}-{}.png'.format(win1, win2)).resolve())
+        figname = str(self.results_dir.joinpath('compare-window-strats-bar-per-breath-{}-{}-mins-{}.png'.format(win1, win2, self.n_minutes)).resolve())
+        plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
@@ -933,7 +946,8 @@ class ResultsContainer(object):
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
             plt.setp(xtick_names, rotation=90)
-        figname = str(self.results_dir.joinpath('compare-window-strats-bar-{}-{}.png'.format(win1, win2)).resolve())
+        figname = str(self.results_dir.joinpath('compare-window-strats-bar-{}-{}-mins-{}.png'.format(win1, win2, self.n_minutes)).resolve())
+        plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
     def compare_window_strategies_scatter_per_patient(self, windowing1, windowing2, individual_patients=False, std_lim=None):
@@ -960,7 +974,7 @@ class ResultsContainer(object):
 
         name_mapping = {'smd': 'SMD', 'wmd': 'WMD', None: 'No Windowing'}
         plt_title = '{} vs {}'.format(name_mapping[windowing1], name_mapping[windowing2])
-        figname = '{}_vs_{}-scatter.png'.format(windowing1, windowing2)
+        figname = '{}_vs_{}-scatter-mins-{}.png'.format(windowing1, windowing2, self.n_minutes)
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(name_mapping[windowing1], name_mapping[windowing2])
         self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
@@ -1226,14 +1240,16 @@ class ResultsContainer(object):
         ax.set_ylabel('Difference of (Compliance - Algo)', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 26)
-        fig.savefig(self.results_dir.joinpath('{}_ad_windowing_{}_boxplot_result.png'.format(windowing, figname_prefix)).resolve(), dpi=self.dpi)
+        plt.tight_layout()
+        fig.savefig(self.results_dir.joinpath('{}_ad_windowing_{}_boxplot_result-mins-{}.png'.format(windowing, figname_prefix, self.n_minutes)).resolve(), dpi=self.dpi)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True, showfliers=False)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 31)
-        fig.savefig(self.results_dir.joinpath('{}_std_windowing_{}_boxplot_result.png'.format(windowing, figname_prefix)).resolve(), dpi=self.dpi)
+        plt.tight_layout()
+        fig.savefig(self.results_dir.joinpath('{}_std_windowing_{}_boxplot_result-mins-{}.png'.format(windowing, figname_prefix, self.n_minutes)).resolve(), dpi=self.dpi)
 
     def show_individual_breath_by_breath_frame_results(self, df, figname, windowing):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
@@ -1260,8 +1276,9 @@ class ResultsContainer(object):
         ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
         ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
-        title = figname.replace('.png', '').replace('_', ' ')
+        title = figname.replace('.png', '').replace('_', ' ').replace('-', ': ')
         ax.set_title(title, fontsize=20)
+        plt.tight_layout()
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
         # show table of boxplot results
@@ -1322,7 +1339,8 @@ class ResultsContainer(object):
                     axes[i][j].set_ylim((min_, y_max+5))
 
             plt.suptitle('Window Size {}'.format(size), fontsize=28, y=.9)
-            fig.savefig(self.results_dir.joinpath('algo_based_multi_window_analysis_regression_size_{}.png'.format(size)).resolve(), dpi=self.dpi)
+            plt.tight_layout()
+            fig.savefig(self.results_dir.joinpath('algo_based_multi_window_analysis_regression_size_{}_mins_{}.png'.format(size, self.n_minutes)).resolve(), dpi=self.dpi)
             plt.show(fig)
 
     def perform_multi_window_analysis_regression(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), robust=False):
@@ -1372,7 +1390,8 @@ class ResultsContainer(object):
                     axes[i][j].set_ylim((min_, y_max+5))
 
             plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28, y=.9)
-            fig.savefig(self.results_dir.joinpath('{}_multi_window_analysis_regression.png'.format(algo)).resolve(), dpi=self.dpi)
+            plt.tight_layout()
+            fig.savefig(self.results_dir.joinpath('{}_multi_window_analysis_regression_mins_{}.png'.format(algo, self.n_minutes)).resolve(), dpi=self.dpi)
             plt.show(fig)
 
     def perform_multi_window_analysis_bar(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], windowing='smd'):
@@ -1391,13 +1410,20 @@ class ResultsContainer(object):
 
         super_frame = None
         fig, ax = plt.subplots(figsize=(3*8, 4*3))
+        windows = ['No Windowing'] + windows
         for size in windows:
-            cols = ['{}_{}_{}'.format(algo, windowing, size) for algo in self.algos_used]
+            if size == 'No Windowing':
+                cols = ['{}_diff'.format(algo) for algo in self.algos_used]
+            else:
+                cols = ['{}_{}_{}'.format(algo, windowing, size) for algo in self.algos_used]
             if absolute:
                 frame = self.proc_results[cols].abs()
             else:
                 frame = self.proc_results[cols]
-            rename_cols = {col: col.replace('_{}_{}'.format(windowing, size), '') for col in cols}
+            if size == 'No Windowing':
+                rename_cols = {col: col.replace('_diff', '') for col in cols}
+            else:
+                rename_cols = {col: col.replace('_{}_{}'.format(windowing, size), '')  for col in cols}
             frame = frame.rename(columns=rename_cols)
             frame = frame.melt()
             frame['Window Size'] = size
@@ -1411,7 +1437,9 @@ class ResultsContainer(object):
         plt.xlabel('Algorithm')
         xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
         plt.setp(xtick_names, rotation=90)
-        fig.savefig(self.results_dir.joinpath('multi_window_analysis_bar-windowing-{}.png'.format(windowing)).resolve(), dpi=self.dpi)
+        plt.legend(loc='upper right', framealpha=.7)
+        plt.tight_layout()
+        fig.savefig(self.results_dir.joinpath('multi_window_analysis_bar-windowing-{}-mins-{}.png'.format(windowing, self.n_minutes)).resolve(), dpi=self.dpi)
         plt.show(fig)
 
     def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05), algos=[], robust=False, robust_and_reg=False, show_median=False):
@@ -1453,7 +1481,7 @@ class ResultsContainer(object):
     def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[], windowing=None):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
         exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
-        windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}.png'.format(y))
+        windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}-mins-{}.png'.format(y, self.n_minutes))
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
             windowing_mod('breath_by_breath_results.png', windowing),
@@ -1561,7 +1589,7 @@ class ResultsContainer(object):
                         factor. Normally is set to None (no limit). But can be
                         set to any floating value > 0.
         """
-        windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}.png'.format(y))
+        windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}-mins-{}.png'.format(y, self.n_minutes))
         # Patient by Patient. All breathing
         self.plot_algo_scatter(
             self.pp_frames['all'][self.window_n],
@@ -1787,7 +1815,8 @@ class ResultsContainer(object):
                 ax.set_title('{} plot by patient'.format(algo), fontsize=20)
                 # want to keep a constant y perspective to compare algos
                 #ax.set_ylim(-0.07, 0.07)
-                fig.savefig(self.results_dir.joinpath('{}_breath_by_breath_patient_result.png'.format(algo)).resolve(), dpi=self.dpi)
+                plt.tight_layout()
+                fig.savefig(self.results_dir.joinpath(windowing_mod('{}_breath_by_breath_patient_result.png'.format(algo), windowing)).resolve(), dpi=self.dpi)
 
     def save_results(self):
         if not self.results_dir.parent.exists():
@@ -1831,7 +1860,8 @@ class ResultsContainer(object):
             plt.ylim(ts_ylim)
         plt.plot(patient_df.gold_stnd_compliance, label='gt')
         plt.xlabel('DataFrame index')
-        plt.savefig(self.results_dir.joinpath('{}-individual-breath-time-series-plot.png'.format(patient)).resolve(), dpi=self.dpi)
+        plt.tight_layout()
+        plt.savefig(self.results_dir.joinpath('{}-individual-breath-time-series-plot-mins-{}.png'.format(patient, self.n_minutes)).resolve(), dpi=self.dpi)
         plt.show()
 
         pp_custom = self.analyze_per_patient_df(patient_df)
@@ -1839,7 +1869,7 @@ class ResultsContainer(object):
             pp_custom,
             windowing,
             'Patient {}. Custom plot'.format(patient),
-            '{}_custom_scatter_plot-windowing-{}.png'.format(patient, windowing),
+            '{}_custom_scatter_plot-windowing-{}-mins-{}.png'.format(patient, windowing, self.n_minutes),
             False,
             None,
         )
@@ -1847,7 +1877,7 @@ class ResultsContainer(object):
         # breath by breath results
         self.show_individual_breath_by_breath_frame_results(
             patient_df,
-            '{}_custom_breath_by_breath-windowing-{}.png'.format(patient, windowing),
+            '{}_custom_breath_by_breath-windowing-{}-mins-{}.png'.format(patient, windowing, self.n_minutes),
             windowing,
         )
 
