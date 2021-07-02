@@ -256,11 +256,11 @@ class ResultsContainer(object):
 
         fig.legend(fontsize=16, loc='center right')
         ax.set_title(plt_title, fontsize=20)
-        figname = str(self.results_dir.joinpath(figname).resolve()).replace('.png', '-windowing-{}.png'.format(windowing))
+        figname = str(self.results_dir.joinpath(figname).resolve())
         plt.tight_layout()
         fig.savefig(figname, dpi=self.dpi)
 
-        # show table of boxplot results
+        # show table of scatter results
         table = PrettyTable()
         table.field_names = ['Algorithm', 'Shorthand Name', 'Absolute Difference', 'Standard Deviation (std)']
         medians = np.array([ad_std[algo][2] for algo in algos_in_order])
@@ -270,6 +270,9 @@ class ResultsContainer(object):
         for i, algo in enumerate(algos_in_order):
             table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], stds[i]])
 
+        if np.isnan(medians).all():
+            plt.close()
+            return
         soup = BeautifulSoup(table.get_html_string())
         min_median = np.nanargmin(medians)
         min_std = np.nanargmin(stds)
@@ -450,12 +453,12 @@ class ResultsContainer(object):
         display(HTML(soup.prettify()))
 
     @classmethod
-    def load_from_experiment_name(cls, experiment_name):
+    def load_from_experiment_name(cls, experiment_name, n_minutes):
         """
         Load results container but even easier using the container.pkl obj
         """
         results_dir = Path(__file__).parent.joinpath('results', experiment_name)
-        cls = pd.read_pickle(results_dir.joinpath('ResultsContainer.pkl'))
+        cls = pd.read_pickle(results_dir.joinpath('ResultsContainer_mins_{}.pkl'.format(n_minutes)))
         # a bit dirty, but some older analyses dont have this attr
         try:
             cls.scatter_marker_symbols
@@ -604,7 +607,7 @@ class ResultsContainer(object):
         # save a processed results container because this method takes the
         # longest time out of all the other methods to run
         self.full_analysis_done = True
-        pd.to_pickle(self, self.results_dir.joinpath('ResultsContainer.pkl'))
+        pd.to_pickle(self, self.results_dir.joinpath('ResultsContainer_mins_{}.pkl'.format(self.n_minutes)))
 
     def calc_windows(self, df):
         """
@@ -863,6 +866,42 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
+        plt.show(fig)
+
+    def compare_plat_minutes_bar_per_breath(self, windowing, win_size=20, n_minutes=[5, 10, 15, 30], absolute=True):
+        """
+        """
+        if windowing not in ['wmd', 'smd']:
+            raise ValueError('Must specify a valid window strategy. choices: wmd OR smd')
+        min_containers = [(mins, self.reset_plat_minutes(mins)) for mins in n_minutes]
+
+        super_frame = None
+        fig, ax = plt.subplots(figsize=(3*8, 4*3))
+        for mins, cont in min_containers:
+            cols = ['{}_{}_{}'.format(algo, windowing, win_size) for algo in self.algos_used]
+            cont.set_new_window_n(win_size)
+            if absolute:
+                frame = cont.proc_results[cols].abs()
+            else:
+                frame = cont.proc_results[cols]
+
+            rename_cols = {col: col.replace('_{}_{}'.format(windowing, win_size), '')  for col in cols}
+            frame = frame.rename(columns=rename_cols)
+            frame = frame.melt()
+            frame['Minutes'] = mins
+            if super_frame is None:
+                super_frame = frame
+            else:
+                super_frame = super_frame.append(frame)
+
+        sns.barplot(x='variable', y='value', data=super_frame, hue='Minutes')
+        plt.ylabel('{}Difference (Algo - Compliance)'.format('Absolute ' if absolute else ''))
+        plt.xlabel('Algorithm')
+        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
+        plt.setp(xtick_names, rotation=90)
+        plt.legend(loc='upper right', framealpha=.7)
+        plt.tight_layout()
+        fig.savefig(self.results_dir.joinpath('minute_analysis_bar-windowing-{}_winsize-{}.png'.format(windowing, win_size)).resolve(), dpi=self.dpi)
         plt.show(fig)
 
     def compare_window_strategies_bar_per_breath(self, windowing1, windowing2):
@@ -1818,12 +1857,20 @@ class ResultsContainer(object):
                 plt.tight_layout()
                 fig.savefig(self.results_dir.joinpath(windowing_mod('{}_breath_by_breath_patient_result.png'.format(algo), windowing)).resolve(), dpi=self.dpi)
 
+    def reset_plat_minutes(self, n_minutes):
+        try:
+            return pd.read_pickle(str(self.results_dir.joinpath('ResultsContainer_mins_{}.pkl'.format(n_minutes))))
+        except OSError:
+            self.collate_data(self.algos_used, n_minutes)
+            self.analyze_results()
+            return self
+
     def save_results(self):
         if not self.results_dir.parent.exists():
             self.results_dir.parent.mkdir()
         if not self.results_dir.exists():
             self.results_dir.mkdir()
-        pd.to_pickle(self, str(self.results_dir.joinpath('ResultsContainer.pkl')))
+        pd.to_pickle(self, str(self.results_dir.joinpath('ResultsContainer_mins_{}.pkl'.format(self.n_minutes))))
 
     def set_new_window_n(self, window_n):
         """
@@ -1928,7 +1975,7 @@ def main():
                 print(err)
                 return
             results.add_results_df(patient_id, calcs.results)
-    results.collate_data(calcs.algos_used)
+    results.collate_data(calcs.algos_used, n_minutes=30)
     results.save_results()
 
 
