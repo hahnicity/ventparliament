@@ -79,7 +79,7 @@ class ResultsContainer(object):
         self.pp_frames = {}
         self.bb_frames = {}
 
-    def _draw_seaborn_boxplot_with_bootstrap(self, data, ax, medians=None, palette=None, **kwargs):
+    def _draw_seaborn_boxplot(self, data, ax, medians=None, palette=None, **kwargs):
         """
         Basically an exact replica of what happens in seaborn except for support of
         usermedians
@@ -872,6 +872,13 @@ class ResultsContainer(object):
 
     def compare_plat_minutes_bar_per_breath(self, windowing, win_size=20, n_minutes=[5, 10, 15, 30], absolute=True):
         """
+        Compare different plateau minute ranges in a bar chart.
+
+        :param windowing: wmd OR smd
+        :param win_size: window size. some number > 0
+        :param n_minutes: list of different minute ranges to compare to. individual numbers should be
+                          between 1 and 30.
+        :param absolute: return absolute values for WMD calcs
         """
         if windowing not in ['wmd', 'smd']:
             raise ValueError('Must specify a valid window strategy. choices: wmd OR smd')
@@ -1303,7 +1310,7 @@ class ResultsContainer(object):
 
         # alphabetical order again
         algos_in_order = sorted(list(proc_frame.algo.unique()))
-        self._draw_seaborn_boxplot_with_bootstrap(
+        self._draw_seaborn_boxplot(
             df[sorted_diff_cols],
             ax,
             proc_frame.medians.values,
@@ -1323,7 +1330,10 @@ class ResultsContainer(object):
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
         # show table of boxplot results
-        self._show_breath_by_breath_algo_table(proc_frame, title)
+        try:
+            self._show_breath_by_breath_algo_table(proc_frame, title)
+        except ValueError:  # likely due to an all-nan slice resulting from bootstrap.
+            pass
         plt.show(fig)
 
     def perform_algo_based_multi_window_analysis_regression(self, absolute=True, windows=[5, 10, 20, 50, 100, 200, 400, 800], winsorizor=(0, 0.05), algos=[]):
