@@ -76,7 +76,7 @@ class FileCalculations(object):
     ]
     algos_unavailable_for_vc = ['kannangara', 'ft_insp_lstsq']
 
-    def __init__(self, patient, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, recorded_plat=None, **kwargs):
+    def __init__(self, patient, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, recorded_plat=None, no_algo_restrict=False, **kwargs):
         """
         Calculate lung compliance for an entire file using a variety of algorithms
 
@@ -89,6 +89,7 @@ class FileCalculations(object):
         :param extra_breath_info: DataFrame of additional information like location of valid plat pressures for breath
         :param recorded_compliance: Compliance pre-recorded for the file. Relevant for CVC data
         :param recorded_plat: Plateau Pressure pre-recorded for the file. Relevant for CVC data
+        :param no_algo_restrict: Do not restrict algorithms to their developed modes. Run in all modes available
         """
         self.algo_mapping = {
             "al_rawas": self.al_rawas,
@@ -131,6 +132,7 @@ class FileCalculations(object):
             self.mccay_interface = McCayInterface([.5, 15.], .01, True)
         self.peeps_to_use = peeps_to_use
         self.breath_data = list(read_processed_file(filename))
+        self.no_algo_restrict = no_algo_restrict
         if len(self.breath_data) == 0:
             raise Exception('ventmap found 0 breaths in file: {}! Is this an error?'.format(filename))
         self.dt = self.breath_data[0]['dt']
@@ -873,10 +875,10 @@ class FileCalculations(object):
             ]
 
         for algo in self.algorithms_to_use:
-            if ventmode in ['pc', 'prvc'] and algo in self.algos_unavailable_for_pc_prvc:
+            if ventmode in ['pc', 'prvc'] and algo in self.algos_unavailable_for_pc_prvc and not self.no_algo_restrict:
                 breath_results.append(np.nan)
                 continue
-            elif ventmode == 'vc' and algo in self.algos_unavailable_for_vc:
+            elif ventmode == 'vc' and algo in self.algos_unavailable_for_vc and not self.no_algo_restrict:
                 breath_results.append(np.nan)
                 continue
             func = self.algo_mapping[algo]

@@ -59,7 +59,8 @@ def find_shoulders(flow, pressure, dt):
 
 def get_least_squares_preds(flow, pressure, vols):
     """
-    Get elastance, resistance, K, and residual as defined by least squares eq.
+    Get elastance, resistance, K, and residual as defined by pressure targeted
+    inspiratory least squares eq.
 
         Paw = E*V + R*V^dot + P0
     """
