@@ -57,11 +57,12 @@ def sequential_nan_median(vals, win_size):
 
 class ResultsContainer(object):
 
-    def __init__(self, experiment_name, window_n):
+    def __init__(self, experiment_name, window_n, no_algo_restrict):
         self.proc_results = []
         self.algos_used = []
         self.experiment_name = experiment_name
         self.raw_results = []
+        self.no_algo_restrict = no_algo_restrict
         self.results_dir = Path(__file__).parent.joinpath('results', experiment_name)
         # you can always crank the dpi up for paper time
         self.dpi = 200
@@ -334,8 +335,8 @@ class ResultsContainer(object):
         """
 
         # At least for now just skip the plot if its not sensible to perform
-        if ('fai' in x_col and algo in FileCalculations.algos_unavailable_for_vc) or \
-            ('dci' in x_col and algo in FileCalculations.algos_unavailable_for_pc_prvc):
+        if (('fai' in x_col and algo in FileCalculations.algos_unavailable_for_vc) or \
+            ('dci' in x_col and algo in FileCalculations.algos_unavailable_for_pc_prvc)) and not self.no_algo_restrict:
             ax.set_xlim((-1, 1))
             ax.annotate('N/A due to algo restrictions', (-.5, 0), fontsize=22)
             ax.set_ylim((-1, 1))
@@ -634,9 +635,9 @@ class ResultsContainer(object):
             diff_colname = '{}_diff_{}'.format(algo, self.window_n)
             df[wmd_colname] = df.gold_stnd_compliance - df[wm_colname]
             # make sure algo calcs are null if not available for specific mode
-            if algo in FileCalculations.algos_unavailable_for_vc:
+            if algo in FileCalculations.algos_unavailable_for_vc and not self.no_algo_restrict:
                 df.loc[df.ventmode == 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
-            elif algo in FileCalculations.algos_unavailable_for_pc_prvc:
+            elif algo in FileCalculations.algos_unavailable_for_pc_prvc and not self.no_algo_restrict:
                 df.loc[df.ventmode != 'vc', [wm_colname, wmd_colname, diff_colname]] = np.nan
 
         for patiend_id, pt_df in df.groupby('patient_id'):
@@ -648,9 +649,9 @@ class ResultsContainer(object):
             sm_colname = '{}_sm_{}'.format(algo, self.window_n)
             smd_colname = '{}_smd_{}'.format(algo, self.window_n)
             df[smd_colname] = df.gold_stnd_compliance - df[sm_colname]
-            if algo in FileCalculations.algos_unavailable_for_vc:
+            if algo in FileCalculations.algos_unavailable_for_vc and not self.no_algo_restrict:
                 df.loc[df.ventmode == 'vc', [sm_colname, smd_colname]] = np.nan
-            elif algo in FileCalculations.algos_unavailable_for_pc_prvc:
+            elif algo in FileCalculations.algos_unavailable_for_pc_prvc and not self.no_algo_restrict:
                 df.loc[df.ventmode != 'vc', [sm_colname, smd_colname]] = np.nan
 
     def calc_async_index(self, df):
@@ -735,6 +736,8 @@ class ResultsContainer(object):
                 # So instead use the median
                 algo_median = df[algo].median(skipna=True)
                 algo_mad = median_absolute_deviation(df[algo].values, nan_policy='omit')
+                # remove anything with < 0  compliance
+                self.proc_results.loc[df[df[algo] < 0].index, algo] = np.nan
                 # multiply the algo mad by 30 because std can be so ridiculous that it
                 # is literally non-physiological 30x removal will basically remove
                 # everything within the range that is non-physiologic. If we do not
@@ -1357,8 +1360,8 @@ class ResultsContainer(object):
                 win_col = col.format(size)
 
                 for algo in algos_to_use:
-                    if ('fai' in col and algo in FileCalculations.algos_unavailable_for_vc) or \
-                        ('dci' in col and algo in FileCalculations.algos_unavailable_for_pc_prvc):
+                    if (('fai' in col and algo in FileCalculations.algos_unavailable_for_vc) or \
+                        ('dci' in col and algo in FileCalculations.algos_unavailable_for_pc_prvc)) and not self.no_algo_restrict:
                         continue
 
                     self._regplot_wmd(self.proc_results, algo, win_col, size, axes[i][j], winsorizor, {'s': 0, 'alpha': .0}, {'label': algo, 'lw': 3}, absolute, False, False, False)
@@ -1938,13 +1941,14 @@ def main():
     parser.add_argument('-dp', '--data-path', default=str(Path(__file__).parent.joinpath('../dataset/processed_data')))
     parser.add_argument('--cvc-only', action='store_true', help='only analyze cvc data')
     parser.add_argument('--no-cvc', action='store_true', help='dont analyze cvc data')
+    parser.add_argument('--no-algo-restrictions', action='store_true', help='Do not restrict algorithms to their designed modes. Run in all modes possible')
 
     args = parser.parse_args()
 
     all_patient_dirs = Path(args.data_path).glob('*')
     algo = 'predator'
     baseline = 'insp_least_squares'
-    results = ResultsContainer(args.experiment_name, 20)
+    results = ResultsContainer(args.experiment_name, 20, args.no_algo_restrictions)
 
     for dir_ in sorted(list(all_patient_dirs)):
         if args.cvc_only and 'cvc' not in str(dir_):
@@ -1964,7 +1968,7 @@ def main():
                 recorded_compliance = int(open(compliance_f).read().strip())
             else:
                 recorded_compliance = None
-            calcs = FileCalculations(patient_id, str(file), args.algos, 9, extra, tc_algos=args.tc_algos, lourens_tc_choice=args.lourens_tc_choice, recorded_compliance=recorded_compliance)
+            calcs = FileCalculations(patient_id, str(file), args.algos, 9, extra, tc_algos=args.tc_algos, lourens_tc_choice=args.lourens_tc_choice, recorded_compliance=recorded_compliance, no_algo_restrict=args.no_algo_restrictions)
             try:
                 calcs.analyze_file()
             except Exception as err:
