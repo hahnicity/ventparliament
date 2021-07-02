@@ -256,17 +256,12 @@ class ResultsContainer(object):
 
         fig.legend(fontsize=16, loc='center right')
         ax.set_title(plt_title, fontsize=20)
-        figname = str(self.results_dir.joinpath(figname).resolve())
-        plt.tight_layout()
-        fig.savefig(figname, dpi=self.dpi)
 
         # show table of scatter results
         table = PrettyTable()
         table.field_names = ['Algorithm', 'Shorthand Name', 'Absolute Difference', 'Standard Deviation (std)']
-        medians = np.array([ad_std[algo][2] for algo in algos_in_order])
-        stds = np.array([ad_std[algo][3] for algo in algos_in_order])
-        medians = medians.round(2)
-        stds = stds.round(2)
+        medians = np.array([ad_std[algo][2] for algo in algos_in_order]).round(2)
+        stds = np.array([ad_std[algo][3] for algo in algos_in_order]).round(2)
         for i, algo in enumerate(algos_in_order):
             table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], stds[i]])
 
@@ -285,7 +280,11 @@ class ResultsContainer(object):
 
         display(HTML('<h2>{}</h2>'.format(plt_title)))
         display(HTML(soup.prettify()))
+
+        # show plot
         plt.tight_layout()
+        figname = str(self.results_dir.joinpath(figname).resolve())
+        fig.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
     def _perform_single_window_analysis(self, df, absolute, winsorizor, algos, robust, robust_and_reg, show_median):
@@ -848,7 +847,7 @@ class ResultsContainer(object):
 
         # alphabetical order again
         algos_in_order = sorted([algo.replace(diff_colname_suffix, '') for algo in sorted_diff_cols])
-        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=self.boot_resamples, showfliers=False, palette='Set2')
+        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette='Set2')
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
         plt.setp(xtick_names, rotation=60, fontsize=14)
         xlim = ax.get_xlim()
@@ -1275,7 +1274,7 @@ class ResultsContainer(object):
         ad_col, std_col = self._get_windowing_colnames(windowing)
         algo_ordering = sorted(list(df.algo.unique()))
 
-        sns.boxplot(x='algo', y=ad_col, data=df, order=algo_ordering, notch=True, showfliers=False)
+        sns.boxplot(x='algo', y=ad_col, data=df, order=algo_ordering, notch=False, showfliers=False)
         ax.set_ylabel('Difference of (Compliance - Algo)', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 26)
@@ -1283,7 +1282,7 @@ class ResultsContainer(object):
         fig.savefig(self.results_dir.joinpath('{}_ad_windowing_{}_boxplot_result-mins-{}.png'.format(windowing, figname_prefix, self.n_minutes)).resolve(), dpi=self.dpi)
 
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
-        sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=True, showfliers=False)
+        sns.boxplot(x='algo', y=std_col, data=df, order=algo_ordering, notch=False, showfliers=False)
         ax.set_ylabel('Standard Deviation ($\sigma$) of Algo', fontsize=16)
         ax.set_xlabel('Algorithm', fontsize=16)
         ax.set_ylim(-.4, 31)
@@ -1306,7 +1305,7 @@ class ResultsContainer(object):
             ax,
             proc_frame.medians.values,
             notch=False,
-            bootstrap=self.boot_resamples,
+            bootstrap=None,
             palette=[self.algo_colors[algo] for algo in algos_in_order]
         )
         xtick_names = plt.setp(ax, xticklabels=algos_in_order)
