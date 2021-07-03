@@ -6,6 +6,8 @@ from scipy.integrate import simps
 from scipy.optimize import curve_fit
 from scipy.stats import linregress
 
+from parliament.howe_main import split_parameters as howe_main
+
 
 def _perform_least_squares(a, pressure, tvi, peep):
     """
@@ -266,17 +268,11 @@ def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi)
     if x0_index >= len(flow)-1:
         return (np.nan, np.nan, np.nan, np.nan, np.nan)
 
-    start_idx = x0_index - 1
-    vols = calc_volumes(flow[start_idx:], dt)
-    f_new = flow[start_idx:]
-    p_new = np.array(pressure[start_idx:])
-    p_new = p_new - p_new[0]
-    a = np.array([vols, f_new]).transpose()
-    least_square_result = np.linalg.lstsq(a, np.array(p_new))
-    solution = least_square_result[0]
-    elastance = solution[0]
-    plat = tvi * elastance + peep
-    return plat, 1 / elastance, solution[1], peep, least_square_result[1]
+    vols = calc_volumes(flow, dt)
+    insp_elastance, insp_resistance, exp_elastance, exp_resistance, peep, pmax = \
+        howe_main(pressure, flow, vols, int(1/dt), calc_volumes)
+    plat = tvi * exp_elastance + peep
+    return plat, 1/exp_elastance, exp_resistance, peep, np.nan
 
 
 def ikeda_time_const(flow, tvi, tve, dt):
@@ -400,6 +396,11 @@ def pt_inspiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
     This method is will work in more situations than other methods will,
     but it's also going to be the least accurate, especially when a patient
     is exerting force of their muscles
+
+    In this implementation we allow the least squares eq to find K. It requires
+    a bit more computation, but empirically we've found it to be more accurate
+    than when we set K to PEEP. This is perhaps because the eq is allowed to
+    handle some of PEEPi and P_0.
 
     :param flow: array vals of flow measurements in L/s
     :param vols: breath volume in L per observation of the flow array
