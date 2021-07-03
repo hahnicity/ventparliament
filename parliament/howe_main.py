@@ -1,19 +1,24 @@
-import matplotlib.pyplot as plt
+"""
+howe_main
+~~~~~~~~~
+
+Code from Howe's 2020 paper adapted for our purpose
+"""
 from numpy import nan
 import numpy as np
 from numpy.linalg import lstsq
 
+from parliament.other_calcs import calc_volumes
+
 
 # this is the main function that performs the Howe method
-def split_parameters(pressure,
-                    flow,
-                    volume,
-                    sampling_frequency,
-                    volumes_func,
-                    prev_peep=nan,
-                    end_insp=nan,
-                    prev_P_max=nan,
-                    ):
+def perform_howe_algo(pressure,
+                      flow,
+                      volume,
+                      sampling_frequency,
+                      prev_peep=nan,
+                      end_insp=nan,
+                      prev_P_max=nan):
     Ei = nan
     Ri = nan
     Ee = nan
@@ -43,13 +48,6 @@ def split_parameters(pressure,
     # End of inspiration:
     # Working backwards, find the last
     # point of positive flow in the data
-#    end_insp = len(flow) - 1
-#    i = len(flow)*1/2
-#    while i > 0:
-#        if(flow[i] < 0.01 and flow[i-1] > 0.01):
-#            end_insp = i
-#            i = 0
-#        i -= 1
     if(np.isnan(end_insp)):
         end_insp = start_insp + 15
         i = end_insp
@@ -61,16 +59,9 @@ def split_parameters(pressure,
 
     # start of expiration
     start_exp = end_insp + 1
-#    i = len(flow)*1/2
-#    while(i > end_insp):
-#        if(flow[i] < 0 and flow[i-1] >= 0):
-#            start_exp = i
-#            i = 0
-#        i -= 1
 
     # Get start and end point away from edges of insp
     # for parameter ID
-    #start = start_insp + (end_insp - start_insp)*1/8
     start = start_insp + 5
     end = end_insp - 5
 
@@ -80,11 +71,6 @@ def split_parameters(pressure,
     pressure = [p - peep for p in pressure]
 
     # Mess with pressure in expiration to make constant 0
-    #k = start_exp
-    #while k < len(pressure):
-    #    pressure[k] = 0
-    #    k += 1
-
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     # Check there are more than the minimum data points
@@ -202,21 +188,16 @@ def split_parameters(pressure,
         # area difference to choose the corner pressure
         area_difference = 0
         if(start_exp-P_max_index > 1):
-            old_area = volumes_func(pressure[P_max_index:start_exp], 1/sampling_frequency)
-            new_area = volumes_func(reconstruction_line[:start_exp-P_max_index], 1/sampling_frequency)
+            old_area = calc_volumes(pressure[P_max_index:start_exp], 1/sampling_frequency)
+            new_area = calc_volumes(reconstruction_line[:start_exp-P_max_index], 1/sampling_frequency)
             area_difference = (new_area[-1] - old_area[-1]) / new_area[-1]
 
         # force reconstruction of inspiratory pressure for results
         if(area_difference > 1.525):
             start = start_insp + 8
             end = end_insp - 4
-            #plt.plot(pressure)
             reconstruction_line.reverse()
             pressure = reconstruction_line
-            #plt.plot(pressure)
-            #plt.plot(start, pressure[start], 'o')
-            #plt.plot(end, pressure[end], 'o')
-            #plt.show()
 
             # Crop data to insp range
             pres = pressure[start:end]
@@ -240,3 +221,38 @@ def split_parameters(pressure,
         return(Ei, Ri, Ee, Re, peep, P_max)
     else:
         return(nan, nan, nan, nan, peep, P_max)
+
+
+def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
+    """
+    Calculate compliance, resistance, and K via standard single chamber
+    model equation. Only looks at expiratory section of breath and perform
+    additional modifications suggested by Howe et al. 2020
+
+    Howe SL, Chase JG, Redmond DP, Morton SE, Kim KT, Pretty C, Shaw GM, Tawhai MH, Desaive T.
+    Inspiratory respiratory mechanics estimation by using expiratory data for reverse-triggered
+    breathing cycles. Computer methods and programs in biomedicine. 2020 Apr 1;186:105184.
+
+    This algorithm uses pressure-targeted expiratory least squares model. Model is
+    changed though by ensuring both pressure and volume values are initially set to
+    0.
+
+    :param flow: array vals of flow measurements in L/s
+    :param vols: technically an unused param here. and exists for compatibility
+                 across least squares methods you can set to None if you want.
+    :param pressure: array vals of pressure obs
+    :param x0_index: index where flow crosses 0
+    :param dt: time delta between obs
+    :param peep: positive end expiratory pressure
+    :param tvi: TVi in L
+
+    :returns tuple: plateau pressure, compliance, resistance, peep, residual
+    """
+    # there was no identifiable expiratory location
+    if x0_index >= len(flow)-1:
+        return (np.nan, np.nan, np.nan, np.nan, np.nan)
+
+    vols = calc_volumes(flow, dt)
+    insp_elastance, insp_resistance, exp_elastance, exp_resistance, peep, pmax = perform_howe_algo(pressure, flow, vols, int(1/dt))
+    plat = tvi * exp_elastance + peep
+    return plat, 1/exp_elastance, exp_resistance, peep, np.nan

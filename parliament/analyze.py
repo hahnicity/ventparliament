@@ -9,6 +9,7 @@ from ventmap.constants import META_HEADER
 from ventmap.raw_utils import read_processed_file
 from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
+from parliament.howe_main import howe_expiratory_least_squares
 from parliament.iipr import perform_iipr_algo, perform_iipr_pressure_reconstruction
 from parliament.mccay.interface import McCayInterface
 from parliament.mipr import perform_mipr

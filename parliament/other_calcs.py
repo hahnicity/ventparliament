@@ -6,8 +6,6 @@ from scipy.integrate import simps
 from scipy.optimize import curve_fit
 from scipy.stats import linregress
 
-from parliament.howe_main import split_parameters as howe_main
-
 
 def _perform_least_squares(a, pressure, tvi, peep):
     """
@@ -237,42 +235,6 @@ def fuzzy_clustering_time_const(flow, vols, x0_index, min_n_obs, alpha, gk_cls):
         least_square_result = np.linalg.lstsq(a, -target)
         tau_clust.append(least_square_result[0][0])
     return tau_clust
-
-
-def howe_expiratory_least_squares(flow, vols, pressure, x0_index, dt, peep, tvi):
-    """
-    Calculate compliance, resistance, and K via standard single chamber
-    model equation. Only looks at expiratory section of breath and perform
-    additional modifications suggested by Howe et al. 2020
-
-    Howe SL, Chase JG, Redmond DP, Morton SE, Kim KT, Pretty C, Shaw GM, Tawhai MH, Desaive T.
-    Inspiratory respiratory mechanics estimation by using expiratory data for reverse-triggered
-    breathing cycles. Computer methods and programs in biomedicine. 2020 Apr 1;186:105184.
-
-    This algorithm uses pressure-targeted expiratory least squares model. Model is
-    changed though by ensuring both pressure and volume values are initially set to
-    0.
-
-    :param flow: array vals of flow measurements in L/s
-    :param vols: technically an unused param here. and exists for compatibility
-                 across least squares methods you can set to None if you want.
-    :param pressure: array vals of pressure obs
-    :param x0_index: index where flow crosses 0
-    :param dt: time delta between obs
-    :param peep: positive end expiratory pressure
-    :param tvi: TVi in L
-
-    :returns tuple: plateau pressure, compliance, resistance, peep, residual
-    """
-    # there was no identifiable expiratory location
-    if x0_index >= len(flow)-1:
-        return (np.nan, np.nan, np.nan, np.nan, np.nan)
-
-    vols = calc_volumes(flow, dt)
-    insp_elastance, insp_resistance, exp_elastance, exp_resistance, peep, pmax = \
-        howe_main(pressure, flow, vols, int(1/dt), calc_volumes)
-    plat = tvi * exp_elastance + peep
-    return plat, 1/exp_elastance, exp_resistance, peep, np.nan
 
 
 def ikeda_time_const(flow, tvi, tve, dt):
