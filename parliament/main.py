@@ -323,7 +323,7 @@ class ResultsContainer(object):
                     new_labels += labels[1:]
                 axes[i][j].legend(handles, new_labels, fontsize=16)
 
-            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28, y=.9)
+            plt.suptitle(FileCalculations.algo_name_mapping[algo] + ' n: {}'.format(self.window_n), fontsize=28)
             plt.tight_layout()
             plt.show(fig)
 
@@ -518,7 +518,7 @@ class ResultsContainer(object):
         self.calc_async_index(self.proc_results)
 
         masks = self.get_masks()
-        async_mask = masks['async']
+        async_mask = masks['async_no_fam']
 
         # analyze all per patient breaths
         pp_all = self.analyze_per_patient_df(self.proc_results)
@@ -1441,7 +1441,7 @@ class ResultsContainer(object):
                     min_ = y_min-5 if not absolute else -1
                     axes[i][j].set_ylim((min_, y_max+5))
 
-            plt.suptitle('Window Size {}'.format(size), fontsize=28, y=.9)
+            plt.suptitle('Window Size {}'.format(size), fontsize=28)
             plt.tight_layout()
             fig.savefig(self.results_dir.joinpath('algo_based_multi_window_analysis_regression_size_{}_mins_{}.png'.format(size, self.n_minutes)).resolve(), dpi=self.dpi)
             plt.show(fig)
