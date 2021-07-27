@@ -1242,10 +1242,62 @@ class ResultsContainer(object):
                 (self.proc_results.insp_efforting == 0) &
                 (self.proc_results.exp_efforting == 0)
             ),
-            'pc_only': (self.proc_results.ventmode == 'pc'),
+            'pc_only': (self.proc_results.ventmode == 'pc' ),
+            'pc_async_only_no_fam': ((self.proc_results.ventmode == 'pc') & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa > 1) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
+            'pc_no_async': ((self.proc_results.ventmode == 'pc') & (
+                (self.proc_results.dta == 0) &
+                (self.proc_results.bsa == 0) &
+                (self.proc_results.fa == 0) &
+                (self.proc_results.static_dca == 0) &
+                (self.proc_results.dyn_dca == 0) &
+                (self.proc_results.artifact == 0)
+            )),
             'pc_prvc': self.proc_results.ventmode.isin(['pc', 'prvc']),
+            'pc_prvc_async_only_no_fam': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa > 1) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
+            'pc_prvc_no_async': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.dta == 0) &
+                (self.proc_results.bsa == 0) &
+                (self.proc_results.fa == 0) &
+                (self.proc_results.static_dca == 0) &
+                (self.proc_results.dyn_dca == 0) &
+                (self.proc_results.artifact == 0)
+            )),
             'prvc_only': (self.proc_results.ventmode == 'prvc'),
             'vc_only': (self.proc_results.ventmode == 'vc'),
+            'vc_async_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa != 0) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
+            'vc_async_only_no_fam': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa > 1) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
+            'vc_no_async': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.dta == 0) &
+                (self.proc_results.bsa == 0) &
+                (self.proc_results.fa == 0) &
+                (self.proc_results.static_dca == 0) &
+                (self.proc_results.dyn_dca == 0) &
+                (self.proc_results.artifact == 0)
+            )),
         }
 
     def preprocess_ad_std_in_df(self, df, windowing):
