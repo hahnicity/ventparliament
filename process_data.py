@@ -44,9 +44,10 @@ class Processing(object):
         vm = pd.read_csv(ventmode_file)
         study_supported_modes = ['vc', 'pc', 'prvc']
         cvc_modes = ['vc', 'pc', 'prvc', 'cpap_sbt', 'ps']
+        non_supported_modes = ['ps', 'simv', 'pav', 'vs', 'cpap_sbt', 'aprv', 'other']
         saved_bns = extra_br_metadata[:, 0]
         mode_df = vm[vm.bn.isin(saved_bns)]
-        if mode_df[study_supported_modes].sum().sum() != len(mode_df) and not is_cvc:
+        if mode_df[non_supported_modes].sum().sum() >= 1 and not is_cvc:
             raise Exception('file {} has ventmodes that are not supported by this study'.format(raw_file.name))
         mode_df['ventmode'] = ''
 

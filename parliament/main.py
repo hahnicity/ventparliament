@@ -613,7 +613,7 @@ class ResultsContainer(object):
         """
         Calculates the windowed stats of an algorithm for
         a set window size. Calcs windowed median deviation (WMD) and sequential
-        median deviation (SMD).
+        median deviation (SMD). Also performs a bit of preprocessing onto the dataset
 
         Note: WM = window median
               SM = sequential median
@@ -653,6 +653,8 @@ class ResultsContainer(object):
                 df.loc[df.ventmode == 'vc', [sm_colname, smd_colname]] = np.nan
             elif algo in FileCalculations.algos_unavailable_for_pc_prvc and not self.no_algo_restrict:
                 df.loc[df.ventmode != 'vc', [sm_colname, smd_colname]] = np.nan
+        # clear any breaths where there is no supported ventmode
+        df = df[~(df.ventmode == '')]
 
     def calc_async_index(self, df):
         """
