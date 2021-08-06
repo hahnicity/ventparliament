@@ -255,8 +255,11 @@ class ResultsContainer(object):
         ax.set_xlim(preset_xlim)
         ax.set_ylim(preset_ylim)
 
-        fig.legend(fontsize=16, loc='center right')
         ax.set_title(plt_title, fontsize=20)
+
+        handles, labels = ax.get_legend_handles_labels()
+        new_labels = [FileCalculations.shorthand_name_mapping[lab] for lab in labels]
+        fig.legend(handles, new_labels, fontsize=16, loc='center right', framealpha=0.4)
 
         # show table of scatter results
         table = PrettyTable()
