@@ -1961,7 +1961,7 @@ class ResultsContainer(object):
         if not 'asynci_{}'.format(window_n) in self.proc_results.columns:
             self.analyze_results()
 
-    def visualize_patient(self, patient, algos, extra_mask=None, ts_xlim=None, ts_ylim=None, windowing=None):
+    def visualize_patients(self, patients, algos, extra_mask=None, ts_xlim=None, ts_ylim=None, windowing=None):
         if algos == 'all':
             algos = self.algos_used
         algo_cols = algos
@@ -1971,13 +1971,13 @@ class ResultsContainer(object):
         final_cols = algo_cols + diff_cols + wmd_cols + smd_cols + ['rel_bn', 'gold_stnd_compliance', 'patient_id']
 
         if not isinstance(extra_mask, type(None)):
-            patient_df = self.proc_results[(self.proc_results.patient == patient) & extra_mask][final_cols]
+            patient_df = self.proc_results[(self.proc_results.patient.isin(patients)) & extra_mask][final_cols]
         else:
-            patient_df = self.proc_results[self.proc_results.patient == patient][final_cols]
+            patient_df = self.proc_results[self.proc_results.patient.isin(patients)][final_cols]
 
         patient_df[algo_cols].plot(figsize=(3*8, 4*3), colormap=cc.cm.glasbey, fontsize=16)
         plt.legend(fontsize=16)
-        plt.title(patient, fontsize=20)
+        plt.title(', '.join(patients), fontsize=20)
         if ts_xlim is not None:
             plt.xlim(ts_xlim)
         if ts_ylim is not None:
@@ -1985,15 +1985,15 @@ class ResultsContainer(object):
         plt.plot(patient_df.gold_stnd_compliance, label='gt')
         plt.xlabel('DataFrame index')
         plt.tight_layout()
-        plt.savefig(self.results_dir.joinpath('{}-individual-breath-time-series-plot-mins-{}.png'.format(patient, self.n_minutes)).resolve(), dpi=self.dpi)
+        plt.savefig(self.results_dir.joinpath('{}-individual-breath-time-series-plot-mins-{}.png'.format('-'.join(patients), self.n_minutes)).resolve(), dpi=self.dpi)
         plt.show()
 
         pp_custom = self.analyze_per_patient_df(patient_df)
         self.plot_algo_scatter(
             pp_custom,
             windowing,
-            'Patient {}. Custom plot'.format(patient),
-            '{}_custom_scatter_plot-windowing-{}-mins-{}.png'.format(patient, windowing, self.n_minutes),
+            'Patients {}. Custom plot'.format(', '.join(patients)),
+            '{}_custom_scatter_plot-windowing-{}-mins-{}.png'.format('-'.join(patients), windowing, self.n_minutes),
             False,
             None,
         )
@@ -2001,7 +2001,7 @@ class ResultsContainer(object):
         # breath by breath results
         self.show_individual_breath_by_breath_frame_results(
             patient_df,
-            '{}_custom_breath_by_breath-windowing-{}-mins-{}.png'.format(patient, windowing, self.n_minutes),
+            '{}_custom_breath_by_breath-windowing-{}-mins-{}.png'.format('-'.join(patients), windowing, self.n_minutes),
             windowing,
         )
 
