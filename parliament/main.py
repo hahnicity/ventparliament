@@ -1538,13 +1538,13 @@ class ResultsContainer(object):
                 super_frame = super_frame.append(frame)
 
         sns.barplot(x='variable', y='value', data=super_frame, hue='Window Size')
-        plt.ylabel('{}Difference (Algo - Compliance)'.format('Absolute ' if absolute else ''))
+        plt.ylabel('{}Difference'.format('Absolute ' if absolute else ''))
         plt.xlabel('Algorithm')
         xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
         plt.setp(xtick_names, rotation=90)
         plt.legend(loc='upper right', framealpha=.7)
         plt.tight_layout()
-        fig.savefig(self.results_dir.joinpath('multi_window_analysis_bar-windowing-{}-mins-{}.png'.format(windowing, self.n_minutes)).resolve(), dpi=self.dpi)
+        fig.savefig(self.results_dir.joinpath('multi_window_analysis_bar-windowing-{}-mins-{}-windows_{}.png'.format(windowing, self.n_minutes, '_'.join([str(w) for w in windows]))).resolve(), dpi=self.dpi)
         plt.show(fig)
 
     def perform_single_window_by_patients_and_breaths(self, patient_breath_map, absolute=True, winsorizor=(0, 0.05), algos=[], robust=False, robust_and_reg=False, show_median=False):
