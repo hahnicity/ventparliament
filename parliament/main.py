@@ -255,8 +255,11 @@ class ResultsContainer(object):
         ax.set_xlim(preset_xlim)
         ax.set_ylim(preset_ylim)
 
-        fig.legend(fontsize=16, loc='center right')
         ax.set_title(plt_title, fontsize=20)
+
+        handles, labels = ax.get_legend_handles_labels()
+        new_labels = [FileCalculations.shorthand_name_mapping[lab] for lab in labels]
+        fig.legend(handles, new_labels, fontsize=16, loc='center right', framealpha=0.4)
 
         # show table of scatter results
         table = PrettyTable()
@@ -754,7 +757,7 @@ class ResultsContainer(object):
                 # will do no real good to inform the actual implementation science.
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
 
-    def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing):
+    def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing, label_mask1=None, label_mask2=None):
         """
         Compare results of different masks to each other on patient by patient basis.
         Plot results out with bar chart.
@@ -762,7 +765,11 @@ class ResultsContainer(object):
         :param mask1_name: mask name based on masks obtained from `get_masks`
         :param mask2_name: mask name based on masks obtained from `get_masks`
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param label_mask1: custom label in legend for mask1
+        :param label_mask2: custom label in legend for mask2
         """
+        if (label_mask1 and not label_mask2) or (label_mask2 and not label_mask1):
+            raise Exception('if you have a custom label for one mask, you must provide a custom label for the other')
         masks = self.get_masks()
         mask1 = masks[mask1_name]
         mask2 = masks[mask2_name]
@@ -782,6 +789,10 @@ class ResultsContainer(object):
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
             plt.setp(xtick_names, rotation=90)
+            if label_mask1:
+                handles, labels = ax.get_legend_handles_labels()
+                new_labels = [label_mask1, label_mask2]
+                ax.legend(handles, new_labels, fontsize=20, framealpha=0.4)
         figname = str(self.results_dir.joinpath('compare-patient-level-masks-bar-{}-{}-windowing-{}-mins-{}.png'.format(mask1_name, mask2_name, windowing, self.n_minutes)).resolve())
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
@@ -1166,6 +1177,7 @@ class ResultsContainer(object):
 
     def get_masks(self):
         return {
+            'all': [True] * len(self.proc_results),
             'all_efforting': (
                 (self.proc_results.early_efforting != 0) |
                 (self.proc_results.insp_efforting != 0) |
