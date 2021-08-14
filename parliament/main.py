@@ -1177,6 +1177,7 @@ class ResultsContainer(object):
 
     def get_masks(self):
         return {
+            'all': [True] * len(self.proc_results),
             'all_efforting': (
                 (self.proc_results.early_efforting != 0) |
                 (self.proc_results.insp_efforting != 0) |
