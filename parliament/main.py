@@ -1080,97 +1080,99 @@ class ResultsContainer(object):
         data = [
             # general patient stats
             'n {}s'.format(pt_or_exp),
-            '% Female',
-            'Age (IQR)',
-            'median RASS (IQR)',
-            '% paralyzed',
             # ventmode n
-            'n vc {}s'.format(pt_or_exp),
-            'n pc {}s'.format(pt_or_exp),
-            'n prvc {}s'.format(pt_or_exp),
-            # general breath counts
-            'total breaths',
-            'total vc breaths'.format(pt_or_exp),
-            'total pc breaths'.format(pt_or_exp),
-            'total prvc breaths',
-            'mean breaths per {}'.format(pt_or_exp),
-            'mean vc per {}'.format(pt_or_exp),
-            'mean pc per {}'.format(pt_or_exp),
-            'mean prvc per {}'.format(pt_or_exp),
+            'n breaths',
             # asynchronous breath counts
-            'total vc async breaths',
-            'total pc async breaths',
-            'total prvc async breaths',
-            'mean vc async per {}'.format(pt_or_exp),
-            'mean pc async per {}'.format(pt_or_exp),
-            'mean prvc async per {}'.format(pt_or_exp),
+            'async breaths',
             # deeper dive into asynchronies
-            'total dta breaths',
+            'dta breaths',
             'total bsa breaths',
             'total fa breaths',
+            'total fa mild breaths',
+            'total fa moderate breaths',
+            'total fa severe breaths',
             'total static/dynamic dca breaths',
             'total static dca breaths',
             'total dynamic dca breaths',
-            # proportions of each async out of total async
-            'proportion dta of async',
-            'proportion bsa of async',
-            'proportion fa of async',
-            'proportion static/dynamic dca of async',
         ]
         n_patients = len(self.proc_results.patient_id.unique())
         masks = self.get_masks()
         async_mask = masks['async']
-        vc_pts = len(self.proc_results[self.proc_results.ventmode=='vc'].patient_id.unique())
-        pc_pts = len(self.proc_results[self.proc_results.ventmode=='pc'].patient_id.unique())
-        prvc_pts = len(self.proc_results[self.proc_results.ventmode=='prvc'].patient_id.unique())
+        vc_df = self.proc_results[self.proc_results.ventmode=='vc']
+        pc_df = self.proc_results[self.proc_results.ventmode=='pc']
+        prvc_df = self.proc_results[self.proc_results.ventmode=='prvc']
+        vc_pts = len(vc_df.patient_id.unique())
+        pc_pts = len(pc_df.patient_id.unique())
+        prvc_pts = len(prvc_df.patient_id.unique())
         n_vc_async = len(self.proc_results[(self.proc_results.ventmode=='vc') & async_mask])
         n_pc_async = len(self.proc_results[(self.proc_results.ventmode=='pc') & async_mask])
         n_prvc_async = len(self.proc_results[(self.proc_results.ventmode=='prvc') & async_mask])
         total_async = len(self.proc_results[async_mask])
         vals = [
-            # general stats
-            n_patients,
-            'TODO',  # need sex data. can get this later tho
-            'TODO',  # another thing that we dont need now
-            'TODO',  # get this from cohort.csv
-            'TODO',  # will need to get this from EHR. But probably not necessary yet.
-            # ventmode n
-            vc_pts,
-            pc_pts,
-            prvc_pts,
+            [vc_pts, pc_pts, prvc_pts],
             # general breath counts
-            len(self.proc_results),
-            len(self.proc_results[self.proc_results.ventmode=='vc']),
-            len(self.proc_results[self.proc_results.ventmode=='pc']),
-            len(self.proc_results[self.proc_results.ventmode=='prvc']),
-            len(self.proc_results)/n_patients,
-            len(self.proc_results[self.proc_results.ventmode=='vc']) / vc_pts if vc_pts != 0 else np.nan,
-            len(self.proc_results[self.proc_results.ventmode=='pc']) / pc_pts if pc_pts != 0 else np.nan,
-            len(self.proc_results[self.proc_results.ventmode=='prvc']) / prvc_pts if prvc_pts != 0 else np.nan,
+            [
+                len(self.proc_results[self.proc_results.ventmode=='vc']),
+                len(self.proc_results[self.proc_results.ventmode=='pc']),
+                len(self.proc_results[self.proc_results.ventmode=='prvc'])
+            ],
             # async breath counts
-            n_vc_async,
-            n_pc_async,
-            n_prvc_async,
-            round(n_vc_async / vc_pts, 2) if vc_pts != 0 else np.nan,
-            round(n_pc_async / pc_pts, 2) if pc_pts != 0 else np.nan,
-            n_prvc_async / prvc_pts if prvc_pts != 0 else np.nan,
+            [
+                n_vc_async,
+                n_pc_async,
+                n_prvc_async,
+            ],
             # deeper dive into asynchronies
-            len(self.proc_results[self.proc_results.dta > 0]),
-            len(self.proc_results[self.proc_results.bsa > 0]),
-            len(self.proc_results[self.proc_results.fa > 0]),
-            len(self.proc_results[(self.proc_results.dyn_dca > 0) | (self.proc_results.static_dca > 0)]),
-            len(self.proc_results[(self.proc_results.static_dca > 0)]),
-            len(self.proc_results[(self.proc_results.dyn_dca > 0)]),
-            # proportions
-            round(len(self.proc_results[self.proc_results.dta > 0])/total_async, 2),
-            round(len(self.proc_results[self.proc_results.bsa > 0])/total_async, 2),
-            round(len(self.proc_results[self.proc_results.fa > 0])/total_async, 2),
-            round(len(self.proc_results[(self.proc_results.dyn_dca > 0) | (self.proc_results.static_dca > 0)])/total_async, 2),
+            [
+                len(vc_df[vc_df.dta > 0]),
+                len(pc_df[pc_df.dta > 0]),
+                len(prvc_df[prvc_df.dta > 0]),
+            ],
+            [
+                len(vc_df[vc_df.bsa > 0]),
+                len(pc_df[pc_df.bsa > 0]),
+                len(prvc_df[prvc_df.bsa > 0]),
+            ],
+            [
+                len(vc_df[vc_df.fa > 0]),
+                len(pc_df[pc_df.fa > 0]),
+                len(prvc_df[prvc_df.fa > 0]),
+            ],
+            [
+                len(vc_df[vc_df.fa == 1]),
+                len(pc_df[pc_df.fa == 1]),
+                len(prvc_df[prvc_df.fa == 1]),
+            ],
+            [
+                len(vc_df[vc_df.fa == 2]),
+                len(pc_df[pc_df.fa == 2]),
+                len(prvc_df[prvc_df.fa == 2]),
+            ],
+            [
+                len(vc_df[vc_df.fa == 3]),
+                len(pc_df[pc_df.fa == 3]),
+                len(prvc_df[prvc_df.fa == 3]),
+            ],
+            [
+                len(vc_df[(vc_df.dyn_dca > 0) | (vc_df.static_dca > 0)]),
+                len(pc_df[(pc_df.dyn_dca > 0) | (pc_df.static_dca > 0)]),
+                len(prvc_df[(prvc_df.dyn_dca > 0) | (prvc_df.static_dca > 0)]),
+            ],
+            [
+                len(vc_df[(vc_df.static_dca > 0)]),
+                len(pc_df[(pc_df.static_dca > 0)]),
+                len(prvc_df[(prvc_df.static_dca > 0)]),
+            ],
+            [
+                len(vc_df[(vc_df.dyn_dca > 0)]),
+                len(pc_df[(pc_df.dyn_dca > 0)]),
+                len(prvc_df[(prvc_df.dyn_dca > 0)]),
+            ],
         ]
         table = PrettyTable()
-        table.field_names = ['stat', 'val']
+        table.field_names = ['', 'vc', 'pc', 'prvc']
         for stat, val in zip(data, vals):
-            table.add_row([stat, val])
+            table.add_row([stat]+val)
         prefix = 'CVC' if is_cvc else 'Patient'
         display(HTML('<h2>{}</h2>'.format(prefix + " Data Descriptive Statistics")))
         display(HTML(table.get_html_string()))
