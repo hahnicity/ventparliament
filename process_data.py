@@ -105,6 +105,7 @@ class Processing(object):
         #
         # rel_bn: relative breath num
         # is_valid_plat: true/false
+        rows.approx_plat_time = pd.to_datetime(rows.approx_plat_time)
 
         # Step 1: check for valid plats and add them to an array
         patient_id = rows.iloc[0]['patient_id']
@@ -118,7 +119,8 @@ class Processing(object):
         # of our plateau pressures
         br_to_save = {f: [] for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv')))}
         for f, bn, plat_time in plats:
-            br_to_save[f].append((bn, True))
+            rass = rows.RASS.iloc[(rows.approx_plat_time - plat_time).argmin()]
+            br_to_save[f].append((bn, True, plat_time, rass))
 
         for f in sorted(list(self.raw_data_dir.joinpath(patient_id).glob('*.csv'))):
             with open(str(f), encoding='ascii', errors='ignore') as desc:
@@ -127,7 +129,7 @@ class Processing(object):
                 for br in gen:
                     dt = pd.to_datetime(br['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
                     if is_cvc:
-                        br_to_save[f].append((br['rel_bn'], False))
+                        br_to_save[f].append((br['rel_bn'], False, dt, np.nan))
                         continue
 
                     for _, __, plat_time in plats:
@@ -135,7 +137,8 @@ class Processing(object):
                         if (f, br['rel_bn'], dt) in plats:
                             continue
                         elif plat_time - pd.Timedelta(hours=0.5) < dt < plat_time + pd.Timedelta(hours=0.5):
-                            br_to_save[f].append((br['rel_bn'], False))
+                            rass = rows.RASS.iloc[(rows.approx_plat_time - dt).argmin()]
+                            br_to_save[f].append((br['rel_bn'], False, dt, rass))
                             break
 
         # Step 3: run ventmode and PVA algos. ventmode can be just used to add more
@@ -156,7 +159,7 @@ class Processing(object):
 
                 extra_output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', '.extra.pkl'))
                 process_breath_file(desc, False, str(output_fname), spec_rel_bns=extra_br_metadata[:, 0])
-                extra_results_frame = pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat', 'ventmode'])
+                extra_results_frame = pd.DataFrame(extra_br_metadata, columns=['rel_bn', 'is_valid_plat', 'abs_bs', 'rass', 'ventmode'])
 
             # this is where we use our private PVA detection software. For outside purposes, we've
             # saved the results to file. You can use the results of the algorithm in your own
@@ -187,6 +190,7 @@ class Processing(object):
             extra_results_frame = extra_results_frame.merge(dca, on='rel_bn', how='left')
             no_pc_mask = extra_results_frame.Dyna_DCA.isna()
             extra_results_frame.loc[no_pc_mask, dca_cols] = 0
+
             extra_results_frame = extra_results_frame.rename(columns={'Dyna_DCA': 'dyn_dca', 'Static_DCA': 'static_dca', 'dDCA': 'dyn_dca_timing'})
             extra_results_frame.to_pickle(str(extra_output_fname), protocol=4)
 
