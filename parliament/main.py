@@ -831,15 +831,16 @@ class ResultsContainer(object):
         ylabel = 'Standard Deviation ($\sigma$) of Algo'
         self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
 
-    def compare_breath_level_masks(self, mask1_name, mask2_name, windowing):
+    def compare_breath_level_masks(self, mask1_name, mask2_name, windowing, algos=None):
         """
         Compare results of different masks to each other on breath by breath results.
 
         :param mask1_name: mask name based on masks obtained from `get_masks`
         :param mask2_name: mask name based on masks obtained from `get_masks`
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param algos: list of algos to display
         """
-        algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used)
+        algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used) if algos is None else algos
         if windowing in ['smd', 'wmd']:
             diff_colname_suffix = '_{}_{}'.format(windowing, self.window_n)
         else:
@@ -979,7 +980,7 @@ class ResultsContainer(object):
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
-    def compare_window_strategies_bar_per_patient(self, windowing1, windowing2):
+    def compare_window_strategies_bar_per_patient(self, windowing1, windowing2, label_mask1=None, label_mask2=None):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts. Confidence intervals here tend to be quite
@@ -987,7 +988,12 @@ class ResultsContainer(object):
 
         :param windowing1: window type to use first ('wmd', 'smd', or None)
         :param windowing2: window type to use second ('wmd', 'smd', or None)
+        :param label_mask1: custom label in legend for mask1
+        :param label_mask2: custom label in legend for mask2
         """
+        if (label_mask1 and not label_mask2) or (label_mask2 and not label_mask1):
+            raise Exception('if you have a custom label for one mask, you must provide a custom label for the other')
+        sns.set_style('whitegrid')
         pp = self.analyze_per_patient_df(self.proc_results)
 
         ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1)
@@ -1007,6 +1013,11 @@ class ResultsContainer(object):
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
             plt.setp(xtick_names, rotation=90)
+            if label_mask1:
+                handles, labels = ax.get_legend_handles_labels()
+                new_labels = [label_mask1, label_mask2]
+                ax.legend(handles, new_labels, fontsize=24, loc='upper right')
+                ax.set_xlabel('')
         figname = str(self.results_dir.joinpath('compare-window-strats-bar-{}-{}-mins-{}.png'.format(win1, win2, self.n_minutes)).resolve())
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
