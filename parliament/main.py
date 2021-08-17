@@ -1022,6 +1022,62 @@ class ResultsContainer(object):
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
+    def compare_window_lengths_bar_per_patient(self, windowing, windows=[5, 10, 20, 50, 100, 200]):
+        """
+        Compare results of different window types to each other on patient by patient basis.
+        Plot results out with bar charts. Confidence intervals here tend to be quite
+        wide because our current n is 18. Future work can improve upon this number.
+
+        :param windowing: window type to use ('wmd', 'smd')
+        :param windows: window lengths to compare
+        """
+        def show_ad_std_plot(data, ycolname, legend):
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(3*8, 3*3))
+            sns.barplot(x='Algorithm', y=ycolname, data=data, ax=ax, hue='Window Size')
+            xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
+            plt.setp(xtick_names, rotation=75)
+            if not legend:
+                ax.get_legend().remove()
+            else:
+                ax.legend(loc='upper left', title='Window Size', framealpha=0.4)
+
+            plt.tight_layout()
+            fig.savefig(self.results_dir.joinpath('compare_per_patient_win_lens_{}_mins_{}.png'.format(ycolname.replace(' ', '_'), self.n_minutes)).resolve(), dpi=self.dpi)
+            plt.show(fig)
+            plt.close()
+
+        sns.set_style('whitegrid')
+
+        pp = self.analyze_per_patient_df(self.proc_results)
+        ad_stds = {'None': self.preprocess_ad_std_in_df(pp, None)}
+        for win_size in windows:
+            self.set_new_window_n(win_size)
+            pp = self.analyze_per_patient_df(self.proc_results)
+            ad_stds[win_size] = self.preprocess_ad_std_in_df(pp, windowing)
+
+        window_names = {'wmd': 'WMD', 'smd': 'SMD'}
+        win = window_names[windowing]
+
+        ad_rows = []
+        std_rows = []
+        for size in ad_stds.keys():
+            ad_std = ad_stds[size]
+            for algo, items in ad_std.items():
+                algo_name = FileCalculations.shorthand_name_mapping[algo]
+                for val in items[0]:
+                    ad_rows.append([algo_name, val, size])
+
+            # create frame for std.
+            for algo, items in ad_std.items():
+                algo_name = FileCalculations.shorthand_name_mapping[algo]
+                for val in items[1]:
+                    std_rows.append([algo_name, val, size])
+        ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', 'Window Size'])
+        std_df = pd.DataFrame(std_rows, columns=['Algorithm', 'Standard Deviation', 'Window Size'])
+
+        show_ad_std_plot(ad_df, 'Absolute Difference', False)
+        show_ad_std_plot(std_df, 'Standard Deviation', True)
+
     def compare_window_strategies_scatter_per_patient(self, windowing1, windowing2, individual_patients=False, std_lim=None):
         """
         Compare results of different window types to each other on patient by patient basis.
