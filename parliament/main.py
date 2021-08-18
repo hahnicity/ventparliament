@@ -393,8 +393,6 @@ class ResultsContainer(object):
                 n_boot=self.boot_resamples,
             )
 
-        # XXX can implement smoother to enable dtw viz. but until then, median just
-        # looks like a jagged mess. You can also do scatter for DTW median too.
         if show_median and 'dtw' not in x_col:
             medians = []
             x = []
@@ -757,7 +755,7 @@ class ResultsContainer(object):
                 # will do no real good to inform the actual implementation science.
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
 
-    def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing, label_mask1=None, label_mask2=None):
+    def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing, label_mask1=None, label_mask2=None, algos=None):
         """
         Compare results of different masks to each other on patient by patient basis.
         Plot results out with bar chart.
@@ -767,15 +765,20 @@ class ResultsContainer(object):
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
         :param label_mask1: custom label in legend for mask1
         :param label_mask2: custom label in legend for mask2
+        :param algos: specific algos to analyze. If not set, defaults to all.
         """
         if (label_mask1 and not label_mask2) or (label_mask2 and not label_mask1):
             raise Exception('if you have a custom label for one mask, you must provide a custom label for the other')
+
         masks = self.get_masks()
         mask1 = masks[mask1_name]
         mask2 = masks[mask2_name]
 
         pp1 = self.analyze_per_patient_df(self.proc_results[mask1])
         pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
+        if algos is not None:
+            pp1 = pp1[pp1.algo.isin(algos)]
+            pp2 = pp2[pp2.algo.isin(algos)]
 
         ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing)
         ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing)
@@ -964,9 +967,6 @@ class ResultsContainer(object):
         title = '{} vs {}'.format(win1, win2)
         ax.set_title(title, fontsize=20)
 
-        # XXX technically the bootstrap can give a different answer than this. So it's
-        # likely necessary to extract the bootstrapped results rather than the post-processed results
-        #
         # XXX also for this function we're using mean. so median and IQR is a bit misleading.
         # This is true elsewhere for some of the barplots as well. Need to remove this calc
         # from here and just replace with mean and confidence.
