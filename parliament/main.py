@@ -1177,6 +1177,7 @@ class ResultsContainer(object):
         total_async = len(self.proc_results[async_mask])
         vals = [
             [vc_pts, pc_pts, prvc_pts],
+            # XXX show percentage counts as well so you can include it into the paper.
             # general breath counts
             [
                 len(self.proc_results[self.proc_results.ventmode=='vc']),
@@ -1404,12 +1405,14 @@ class ResultsContainer(object):
 
         return ad_std
 
-    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim):
+    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, algos=None):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
         X-axis is AD and Y-axis is std.
         """
+        if algos is not None:
+            df = df[df.algo.isin(algos)]
         ad_std = self.preprocess_ad_std_in_df(df, windowing)
         self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim)
 
