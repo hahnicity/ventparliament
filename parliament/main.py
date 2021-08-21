@@ -1012,7 +1012,7 @@ class ResultsContainer(object):
 
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
-            plt.setp(xtick_names, rotation=90)
+            plt.setp(xtick_names, rotation=80)
             if label_mask1:
                 handles, labels = ax.get_legend_handles_labels()
                 new_labels = [label_mask1, label_mask2]
