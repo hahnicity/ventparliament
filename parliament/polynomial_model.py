@@ -150,6 +150,6 @@ def perform_polynomial_model(flow, vols, pressure, x0, peep, tvi):
 
     if not ((0 <= solns[0] <= 500) and (0 <= solns[1] <= 500) and solns[2] > 0 and all_roots_real):
         _, comp, resist, K, residual = least_squares_method(flow, vols, pressure, x0, 0.02, peep, tvi)
-        return comp, resist, residual[0], 2
+        return comp, resist, residual[0] if len(residual) > 0 else np.nan, 2
     else:
-        return 1 / solns[0], solns[1], result[1][0], 0
+        return 1 / solns[0], solns[1], result[1][0] if len(result[1]) > 0 else np.nan, 0

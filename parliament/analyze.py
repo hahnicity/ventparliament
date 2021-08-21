@@ -136,12 +136,11 @@ class FileCalculations(object):
         self.peeps_to_use = peeps_to_use
         if filename.endswith('.raw.npy'):
             self.breath_data = list(read_processed_file(filename))
+            self.dt = self.breath_data[0]['dt']
         elif filename.endswith('.csv'):
             self.breath_data = PB840File(open(filename, encoding='ascii', errors='ignore')).extract_raw(False)
+            self.dt = 0.02
         self.no_algo_restrict = no_algo_restrict
-        if len(self.breath_data) == 0:
-            raise Exception('ventmap found 0 breaths in file: {}! Is this an error?'.format(filename))
-        self.dt = self.breath_data[0]['dt']
         self.breath_metadata = [
             MetadataRow(get_production_breath_meta(breath)) for breath in self.breath_data
         ]
@@ -930,10 +929,11 @@ class FileCalculations(object):
             flow = np.array(breath['flow'])
             pressure = np.array(breath['pressure'])
             abs_bs = breath['abs_bs']
+            vent_bn = breath['vent_bn']
             tvi = bm.tvi
             peep = self._get_breath_peep(breath_idx)
 
-            breath_results = [self.patient, rel_bn, abs_bs, peep, tvi]
+            breath_results = [self.patient, rel_bn, vent_bn, abs_bs, peep, tvi]
             for algo in self.algorithms_to_use:
                 func = self.algo_mapping[algo]
 
@@ -943,4 +943,4 @@ class FileCalculations(object):
                 else:
                     breath_results.append(func(breath_idx)*1000)
             all_results.append(breath_results)
-        return pd.DataFrame(all_results, columns=['patient', 'rel_bn', 'abs_bs', 'peep', 'tvi']+self.algorithms_to_use)
+        return pd.DataFrame(all_results, columns=['patient', 'rel_bn', 'vent_bn', 'abs_bs', 'peep', 'tvi']+self.algorithms_to_use)
