@@ -6,7 +6,7 @@ import pandas as pd
 from scipy.integrate import simps
 from ventmap.breath_meta import get_production_breath_meta
 from ventmap.constants import META_HEADER
-from ventmap.raw_utils import read_processed_file
+from ventmap.raw_utils import PB840File, read_processed_file
 from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
 from parliament.howe_main import howe_expiratory_least_squares
@@ -76,6 +76,10 @@ class FileCalculations(object):
         'polynomial', 'pt_insp_lstsq',
     ]
     algos_unavailable_for_vc = ['kannangara', 'ft_insp_lstsq']
+    # XXX leave this off for now because we have decided not to add this
+    # analysis in the current paper
+    #algos_with_tc = ['al_rawas', 'vicario_nieap']
+    algos_with_tc = []
 
     def __init__(self, patient, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, recorded_plat=None, no_algo_restrict=False, **kwargs):
         """
@@ -117,8 +121,6 @@ class FileCalculations(object):
             #"vicario_co_insp": self.vicario_constrained_insp_only,
             "vicario_nieap": self.vicario_nieap,
         }
-        #self.algos_with_tc = ['al_rawas', 'vicario_nieap']
-        self.algos_with_tc = []
         if algorithms_to_use == 'all' or 'all' in algorithms_to_use:
             self.algorithms_to_use = list(self.algo_mapping.keys())
         elif not isinstance(algorithms_to_use, list):
@@ -132,7 +134,10 @@ class FileCalculations(object):
             # XXX not sure where these params come from. But I used them awhile back
             self.mccay_interface = McCayInterface([.5, 15.], .01, True)
         self.peeps_to_use = peeps_to_use
-        self.breath_data = list(read_processed_file(filename))
+        if filename.endswith('.raw.npy'):
+            self.breath_data = list(read_processed_file(filename))
+        elif filename.endswith('.csv'):
+            self.breath_data = PB840File(open(filename, encoding='ascii', errors='ignore')).extract_raw(False)
         self.no_algo_restrict = no_algo_restrict
         if len(self.breath_data) == 0:
             raise Exception('ventmap found 0 breaths in file: {}! Is this an error?'.format(filename))
@@ -265,6 +270,18 @@ class FileCalculations(object):
             self.breath_volumes[breath_idx] = vols
             return vols
 
+    def _get_breath_peep_from_ei_data(self, rel_bn, breath):
+        ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
+        ventmode = ei_row.ventmode
+        per_breath_peep = np.mean(breath['pressure'][-5:])
+
+        if ventmode == 'prvc':
+            peep = per_breath_peep
+        else:
+            min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
+            peep = np.median([row.PEEP for row in self.breath_metadata[min_idx:breath_idx+1]])
+        return peep
+
     def _get_breath_peep(self, breath_idx):
         """
         Get PEEP for the breath. Generally uses a median algorithm to find this,
@@ -286,12 +303,9 @@ class FileCalculations(object):
 
         breath = self.breath_data[breath_idx]
         rel_bn = breath['rel_bn']
-        ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
-        ventmode = ei_row.ventmode
-        per_breath_peep = np.mean(breath['pressure'][-5:])
 
-        if ventmode == 'prvc':
-            peep = per_breath_peep
+        if len(self.extra_breath_info) > 0:
+            peep = self._get_breath_peep_from_ei_data(rel_bn, breath)
         else:
             min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
             peep = np.median([row.PEEP for row in self.breath_metadata[min_idx:breath_idx+1]])
@@ -892,7 +906,41 @@ class FileCalculations(object):
         return breath_results
 
     def analyze_file(self):
+        """
+        Analyze a file under range of scrutiny for DTW/efforting/ventmode
+        characteristics along with plats, previous gold standard findings, and
+        all algorithms desired. Should only be used in cases where scientific
+        results are desired.
+        """
         for idx in range(len(self.breath_data)):
             breath_results = self.analyze_breath(idx)
             self.results.append(breath_results)
         self.results = pd.DataFrame(self.results, columns=self.results_cols)
+
+    def quick_analyze_file(self):
+        """
+        Analyze a file just using the algorithms that we desire to run. Makes
+        no assumption on ventmode restrictions or any other data characteristics
+        """
+        all_results = []
+        for breath_idx in range(len(self.breath_data)):
+            breath = self.breath_data[breath_idx]
+            bm = self.breath_metadata[breath_idx]
+            rel_bn = breath['rel_bn']
+            flow = np.array(breath['flow'])
+            pressure = np.array(breath['pressure'])
+            abs_bs = breath['abs_bs']
+            tvi = bm.tvi
+            peep = self._get_breath_peep(breath_idx)
+
+            breath_results = [self.patient, rel_bn, abs_bs, peep, tvi]
+            for algo in self.algorithms_to_use:
+                func = self.algo_mapping[algo]
+
+                # make sure to format things in ml
+                if algo in self.algos_with_tc:
+                    breath_results.extend(self.perform_algo_with_tc(breath_idx, func)*1000)
+                else:
+                    breath_results.append(func(breath_idx)*1000)
+            all_results.append(breath_results)
+        return pd.DataFrame(all_results, columns=['patient', 'rel_bn', 'abs_bs', 'peep', 'tvi']+self.algorithms_to_use)

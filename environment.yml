@@ -1,4 +1,4 @@
-name: parliament
+name: ventparliament
 dependencies:
   - python>=3.7
   - cython
