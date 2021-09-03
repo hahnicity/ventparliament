@@ -11,7 +11,6 @@ from ventmap.SAM import calc_expiratory_plateau, calc_inspiratory_plateau
 
 from parliament.howe_main import howe_expiratory_least_squares
 from parliament.iipr import perform_iipr_algo, perform_iipr_pressure_reconstruction
-from parliament.mccay.interface import McCayInterface
 from parliament.mipr import perform_mipr
 from parliament.other_calcs import *
 from parliament.polynomial_model import perform_polynomial_model
@@ -130,9 +129,6 @@ class FileCalculations(object):
         self.extra_breath_info = extra_breath_info
         self.filename = filename
         self.patient = patient
-        if 'mccay' in self.algorithms_to_use:
-            # XXX not sure where these params come from. But I used them awhile back
-            self.mccay_interface = McCayInterface([.5, 15.], .01, True)
         self.peeps_to_use = peeps_to_use
         if filename.endswith('.raw.npy'):
             self.breath_data = list(read_processed_file(filename))
@@ -680,17 +676,6 @@ class FileCalculations(object):
         pressures = [b['pressure'] for b in self.breath_data[breath_idx+1-self.predator_n_breaths:breath_idx+1]]
         recon = max_pool_pressure_reconstruction(pressures)
         return self._perform_predator(breath_idx, recon)
-
-    def mccay(self, breath_idx):
-        """
-        Perform McCay's method for finding compliance
-
-        :param breath_idx: relative index of the breath we want to analyze in our file.
-        """
-        breath = self.breath_data[breath_idx]
-        peep = self._get_breath_peep(breath_idx)
-        self.mccay_interface.analyze_breath(breath, peep)
-        return self.mccay_interface.results[breath['rel_bn']]['mean_compliance']
 
     def mipr(self, breath_idx):
         """
