@@ -12,7 +12,8 @@ If you make use of this in your own publications please cite us
 `ventparliament` can be utilized with python3. Install this for use in your own python projects
 
     conda env create -f environment.yml
-    conda activate parliament
+    conda activate ventparliament
+    pip install -e .
 
 ## Usage
 

@@ -729,6 +729,10 @@ class ResultsContainer(object):
                 proc_results.loc[i, 'p_driving'] = proc_results.loc[i, 'p_plat'] - proc_results.loc[i, 'peep']
 
         self.proc_results = proc_results
+
+        # filter out breaths with no ventmode
+        self.proc_results.loc[(self.proc_results.ventmode.isna()) | (self.proc_results.ventmode == '')]
+
         # filter outliers by patient
         for algo in algos_used:
             for patient_id, df in self.proc_results.groupby('patient_id'):
@@ -2094,8 +2098,6 @@ def main():
     args = parser.parse_args()
 
     all_patient_dirs = Path(args.data_path).glob('*')
-    algo = 'predator'
-    baseline = 'insp_least_squares'
     results = ResultsContainer(args.experiment_name, 20, args.no_algo_restrictions)
 
     for dir_ in sorted(list(all_patient_dirs)):

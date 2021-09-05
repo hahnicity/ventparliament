@@ -38,7 +38,7 @@ class Processing(object):
         self.any_or_all = any_or_all
         self.n_breaths = dtw_n_breaths
 
-    def add_ventmode_metadata(self, extra_br_metadata, ventmode_file, raw_file, is_cvc):
+    def add_ventmode_metadata(self, extra_br_metadata, ventmode_file, raw_file, is_cvc, filename):
         if not ventmode_file.exists():
             raise Exception('ventmode file for {} doesnt exist'.format(raw_file.name))
         vm = pd.read_csv(ventmode_file)
@@ -49,11 +49,15 @@ class Processing(object):
         mode_df = vm[vm.bn.isin(saved_bns)]
         if mode_df[non_supported_modes].sum().sum() >= 1 and not is_cvc:
             raise Exception('file {} has ventmodes that are not supported by this study'.format(raw_file.name))
-        mode_df['ventmode'] = ''
+        mode_df['ventmode'] = np.nan
 
         if not is_cvc:
             for mode in study_supported_modes:
                 mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
+
+            if (len(mode_df) - len(mode_df.ventmode.dropna())) > 5:
+                import IPython; IPython.embed()
+                raise Exception('file {} has too many unannotated ventmodes'.format(filename))
         else:
             for mode in cvc_modes:
                 mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
@@ -152,7 +156,7 @@ class Processing(object):
             with open(str(f), encoding='ascii', errors='ignore') as desc:
                 extra_br_metadata = np.array(vals)
                 ventmode_file = f.parent.joinpath('../../ventmodes/{}'.format(f.name.replace('.csv', '_1-ventmode-output.csv')))
-                extra_br_metadata = self.add_ventmode_metadata(extra_br_metadata, ventmode_file, f, is_cvc)
+                extra_br_metadata = self.add_ventmode_metadata(extra_br_metadata, ventmode_file, f, is_cvc, str(f))
                 output_fname = self.processed_data_dir.joinpath(patient_id, f.name.replace('.csv', ''))
                 if not output_fname.parent.exists():
                     output_fname.parent.mkdir()
@@ -166,6 +170,7 @@ class Processing(object):
             # reproduction if you need.
             breaths = list(read_processed_file(str(output_fname)+'.raw.npy'))
             pva, pva_fused = detectPVI(breaths, output_subdir='/tmp', write_results=False)
+
             if len(breaths) != len(extra_results_frame):
                 raise Exception('not supposed to happen, pt: {}'.format(patient_id))
 
