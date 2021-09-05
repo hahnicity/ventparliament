@@ -729,6 +729,8 @@ class ResultsContainer(object):
                 proc_results.loc[i, 'p_driving'] = proc_results.loc[i, 'p_plat'] - proc_results.loc[i, 'peep']
 
         self.proc_results = proc_results
+        # make sure newest metadata is available for frame
+        self.update_for_new_metadata(save=False)
 
         # filter out breaths with no ventmode
         self.proc_results.loc[(self.proc_results.ventmode.isna()) | (self.proc_results.ventmode == '')]
@@ -1165,6 +1167,12 @@ class ResultsContainer(object):
             'total static/dynamic dca breaths',
             'total static dca breaths',
             'total dynamic dca breaths',
+            'rass -1',
+            'rass -2',
+            'rass -3',
+            'rass -4',
+            'rass -5',
+            'rass n/a',
         ]
         n_patients = len(self.proc_results.patient_id.unique())
         masks = self.get_masks()
@@ -1239,6 +1247,36 @@ class ResultsContainer(object):
                 len(vc_df[(vc_df.dyn_dca > 0)]),
                 len(pc_df[(pc_df.dyn_dca > 0)]),
                 len(prvc_df[(prvc_df.dyn_dca > 0)]),
+            ],
+            [
+                len(vc_df[(vc_df.rass == '-1')]),
+                len(pc_df[(pc_df.rass == '-1')]),
+                len(prvc_df[(prvc_df.rass == '-1')]),
+            ],
+            [
+                len(vc_df[(vc_df.rass == '-2')]),
+                len(pc_df[(pc_df.rass == '-2')]),
+                len(prvc_df[(prvc_df.rass == '-2')]),
+            ],
+            [
+                len(vc_df[(vc_df.rass == '-3')]),
+                len(pc_df[(pc_df.rass == '-3')]),
+                len(prvc_df[(prvc_df.rass == '-3')]),
+            ],
+            [
+                len(vc_df[(vc_df.rass == '-4')]),
+                len(pc_df[(pc_df.rass == '-4')]),
+                len(prvc_df[(prvc_df.rass == '-4')]),
+            ],
+            [
+                len(vc_df[(vc_df.rass == '-5')]),
+                len(pc_df[(pc_df.rass == '-5')]),
+                len(prvc_df[(prvc_df.rass == '-5')]),
+            ],
+            [
+                len(vc_df[(vc_df.rass == 'other')]),
+                len(pc_df[(pc_df.rass == 'other')]),
+                len(prvc_df[(prvc_df.rass == 'other')]),
             ],
         ]
         table = PrettyTable()
@@ -2038,7 +2076,7 @@ class ResultsContainer(object):
         if not 'asynci_{}'.format(window_n) in self.proc_results.columns:
             self.analyze_results()
 
-    def update_for_new_metadata(self):
+    def update_for_new_metadata(self, save=True):
         """
         update existing cohort analysis for new metadata that has
         come in. Generally this function is run because of a new
@@ -2069,8 +2107,10 @@ class ResultsContainer(object):
             merged.index = pt_slice.index
             for col in extra_cols:
                 self.proc_results.loc[merged.index, col] = merged[col]
-        # save frame
-        self.save_results()
+
+        if save:
+            # save frame
+            self.save_results()
 
     def visualize_patients(self, patients, algos, extra_mask=None, ts_xlim=None, ts_ylim=None, windowing=None):
         if algos == 'all':
