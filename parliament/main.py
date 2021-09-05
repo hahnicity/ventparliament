@@ -2038,6 +2038,40 @@ class ResultsContainer(object):
         if not 'asynci_{}'.format(window_n) in self.proc_results.columns:
             self.analyze_results()
 
+    def update_for_new_metadata(self):
+        """
+        update existing cohort analysis for new metadata that has
+        come in. Generally this function is run because of a new
+        metadata field that comes in like RASS. However it can also
+        be due to an update in a field as well such as ventmode annotations
+        """
+        extra_cols = [
+            'rass', 'ventmode', 'dta', 'bsa', 'artifact', 'fa', 'dtw',
+            'dyn_dca', 'dyn_dca_timing', 'static_dca', 'fa_loc',
+        ]
+        for patient in self.proc_results.patient.unique():
+            # get patient files
+            processed_dir = Path(__file__).parent.joinpath('../dataset/processed_data/{}'.format(patient))
+            extra_fs = processed_dir.glob('*.extra.pkl')
+            extra_data = pd.concat([pd.read_pickle(str(f)) for f in extra_fs])
+            # now update the processed data with the extra data
+            #
+            # There is a possibility that there will be breaths in extra data that arent in the
+            # analysis because of filtering. you need to make sure the code can handle that.
+            pt_slice = self.proc_results[self.proc_results.patient == patient]
+            merged = pt_slice[['rel_bn', 'abs_bs']].merge(extra_data, how='left', on=['rel_bn', 'abs_bs'])
+            if len(extra_data) != len(pt_slice):
+                print('uneq patient slices on merge. fill this case out')
+                import IPython; IPython.embed()
+                raise Exception('unequal patient slices, this case needs to be covered')
+
+            # this can happen because left index order is preserved
+            merged.index = pt_slice.index
+            for col in extra_cols:
+                self.proc_results.loc[merged.index, col] = merged[col]
+        # save frame
+        self.save_results()
+
     def visualize_patients(self, patients, algos, extra_mask=None, ts_xlim=None, ts_ylim=None, windowing=None):
         if algos == 'all':
             algos = self.algos_used

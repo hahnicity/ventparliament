@@ -56,7 +56,6 @@ class Processing(object):
                 mode_df.loc[mode_df[mode] == 1, 'ventmode'] = mode
 
             if (len(mode_df) - len(mode_df.ventmode.dropna())) > 5:
-                import IPython; IPython.embed()
                 raise Exception('file {} has too many unannotated ventmodes'.format(filename))
         else:
             for mode in cvc_modes:
