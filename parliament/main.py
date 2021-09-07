@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
-from scipy.stats import median_absolute_deviation
+from scipy.stats import median_abs_deviation
 from scipy.stats.mstats import winsorize
 from seaborn.categorical import _BoxPlotter
 from seaborn.utils import remove_na
@@ -195,7 +195,7 @@ class ResultsContainer(object):
         td.insert(0, soup.new_tag('b'))
         td.b.string = val
 
-    def _create_per_patient_comparison_frames(self, ad_std1, ad_std2, hue_colname, hue1, hue2):
+    def _create_per_patient_comparison_frames(self, ad_std1, ad_std2, hue_colname, hue1, hue2, std_or_mad):
         ad_rows = []
         for algo, items in ad_std1.items():
             algo_name = FileCalculations.shorthand_name_mapping[algo]
@@ -218,8 +218,15 @@ class ResultsContainer(object):
             algo_name = FileCalculations.shorthand_name_mapping[algo]
             for val in items[1]:
                 std_rows.append([algo_name, val, hue2])
-        ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', hue_colname])
-        std_df = pd.DataFrame(std_rows, columns=['Algorithm', 'Standard Deviation', hue_colname])
+
+        if std_or_mad == 'std':
+            ylabel = 'Standard Deviation'
+        elif std_or_mad == 'mad':
+            ylabel = 'Median Absolute Deviation'
+
+        xlabel = 'Absolute Difference'
+        ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', xlabel, hue_colname])
+        std_df = pd.DataFrame(std_rows, columns=['Algorithm', ylabel, hue_colname])
         return ad_df, std_df
 
     def _get_windowing_algo_diff_colnames(self, windowing):
@@ -230,21 +237,25 @@ class ResultsContainer(object):
             diff_colname_suffix = '_diff'
         return sorted(["{}{}".format(algo, diff_colname_suffix) for algo in algos_in_frame])
 
-    def _get_windowing_colnames(self, windowing):
+    def _get_windowing_colnames(self, windowing, std_or_mad):
+
+        if std_or_mad not in ['std', 'mad']:
+            raise Exception('For std_or_mad you must either input "mad" or "std"')
+
         if windowing is None:
             ad_col = 'ad_pt'
-            std_col = 'std_pt'
+            dev_col = '{}_pt'.format(std_or_mad)
         elif windowing == 'wmd':
             ad_col = 'ad_wmd'
-            std_col = 'std_wmd'
+            dev_col = '{}_wmd'.format(std_or_mad)
         elif windowing == 'smd':
             ad_col = 'ad_smd'
-            std_col = 'std_smd'
+            dev_col = '{}_smd'.format(std_or_mad)
         else:
             raise ValueError('windowing variable must be None, "wmd", or "smd"')
-        return ad_col, std_col
+        return ad_col, dev_col
 
-    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, custom_xlabel=None, custom_ylabel=None):
+    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=None, custom_ylabel=None):
         """
         Perform scatter plot using with AD and std information for each algorithm.
         """
@@ -282,10 +293,18 @@ class ResultsContainer(object):
         y = [ad_std[a][3] for a in algos_in_order]
         ax.tick_params(axis='x', labelsize=14)
         ax.tick_params(axis='y', labelsize=14)
-        xlabel = 'Absolute Difference of (Compliance - Algo)' if not custom_xlabel else custom_xlabel
-        ylabel = 'Standard Deviation ($\sigma$) of Algo' if not custom_ylabel else custom_ylabel
-        ax.set_ylabel(ylabel, fontsize=16)
-        ax.set_xlabel(xlabel, fontsize=16)
+        xlabel = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
+        if custom_ylabel:
+            ylabel = custom_ylabel
+            dev_field_name = 'Standard Deviation (std)'
+        elif std_or_mad == 'std':
+            ylabel = 'Standard Deviation ($\sigma$)'
+            dev_field_name = 'Standard Deviation (std)'
+        elif std_or_mad == 'mad':
+            ylabel = 'Median Absolute Deviation'
+            dev_field_name = 'Median Absolute Deviation (MAD)'
+        ax.set_ylabel(ylabel, fontsize=22)
+        ax.set_xlabel(xlabel, fontsize=22)
         if std_lim is not None and len(x) > 1:
             ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
             ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
@@ -302,28 +321,28 @@ class ResultsContainer(object):
 
         handles, labels = ax.get_legend_handles_labels()
         new_labels = [FileCalculations.shorthand_name_mapping[lab] for lab in labels]
-        fig.legend(handles, new_labels, fontsize=16, loc='center right', framealpha=0.4)
+        fig.legend(handles, new_labels, fontsize=17, loc='center right', framealpha=0.4)
 
         # show table of scatter results
         table = PrettyTable()
-        table.field_names = ['Algorithm', 'Shorthand Name', 'Absolute Difference', 'Standard Deviation (std)']
+        table.field_names = ['Algorithm', 'Shorthand Name', 'Absolute Difference', dev_field_name]
         medians = np.array([ad_std[algo][2] for algo in algos_in_order]).round(2)
-        stds = np.array([ad_std[algo][3] for algo in algos_in_order]).round(2)
+        devs = np.array([ad_std[algo][3] for algo in algos_in_order]).round(2)
         for i, algo in enumerate(algos_in_order):
-            table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], stds[i]])
+            table.add_row([FileCalculations.algo_name_mapping[algo], algo, medians[i], devs[i]])
 
         if np.isnan(medians).all():
             plt.close()
             return
         soup = BeautifulSoup(table.get_html_string())
         min_median = np.nanargmin(medians)
-        min_std = np.nanargmin(stds)
+        min_dev = np.nanargmin(devs)
         # the +1 is because the header is embedded in a <tr> element
         min_med_elem = soup.find_all('tr')[min_median+1]
-        min_std_elem = soup.find_all('tr')[min_std+1]
+        min_dev_elem = soup.find_all('tr')[min_dev+1]
 
         self._change_td_to_bold(soup, min_med_elem.find_all('td')[2])
-        self._change_td_to_bold(soup, min_std_elem.find_all('td')[3])
+        self._change_td_to_bold(soup, min_dev_elem.find_all('td')[3])
 
         display(HTML('<h2>{}</h2>'.format(plt_title)))
         display(HTML(soup.prettify()))
@@ -536,14 +555,25 @@ class ResultsContainer(object):
             algos_in_frame = set(df.columns).intersection(self.algos_used)
             for algo in algos_in_frame:
                 row = [patient_id, algo]
+
                 row.append(np.nanmedian(frame['{}_diff'.format(algo, self.window_n)].abs()))
                 row.append(np.nanstd(frame[algo]))
+                row.append(median_abs_deviation(frame[algo], nan_policy='omit'))
+
                 row.append(np.nanmedian(frame['{}_wmd_{}'.format(algo, self.window_n)].abs()))
                 row.append(np.nanstd(frame['{}_wmd_{}'.format(algo, self.window_n)]))
+                row.append(median_abs_deviation(frame['{}_wmd_{}'.format(algo, self.window_n)], nan_policy='omit'))
+
                 row.append(np.nanmedian(frame['{}_smd_{}'.format(algo, self.window_n)].abs()))
                 row.append(np.nanstd(frame['{}_smd_{}'.format(algo, self.window_n)]))
+                row.append(median_abs_deviation(frame['{}_smd_{}'.format(algo, self.window_n)], nan_policy='omit'))
+
                 row_results.append(row)
-        cols = ['patient_id', 'algo', 'ad_pt', 'std_pt', 'ad_wmd', 'std_wmd', 'ad_smd', 'std_smd']
+
+        cols = [
+            'patient_id', 'algo', 'ad_pt', 'std_pt', 'mad_pt', 'ad_wmd',
+            'std_wmd', 'mad_wmd', 'ad_smd', 'std_smd', 'mad_smd'
+        ]
         return pd.DataFrame(row_results, columns=cols)
 
     def analyze_results(self):
@@ -793,7 +823,7 @@ class ResultsContainer(object):
                 # I've found that mean can blow up in the presence of outliers.
                 # So instead use the median
                 algo_median = df[algo].median(skipna=True)
-                algo_mad = median_absolute_deviation(df[algo].values, nan_policy='omit')
+                algo_mad = median_abs_deviation(df[algo].values, nan_policy='omit')
                 # remove anything with < 0  compliance
                 self.proc_results.loc[df[df[algo] < 0].index, algo] = np.nan
                 # multiply the algo mad by 30 because std can be so ridiculous that it
@@ -811,7 +841,7 @@ class ResultsContainer(object):
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
         self.full_analysis_done = False
 
-    def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing, label_mask1=None, label_mask2=None, algos=None):
+    def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing, std_or_mad, label_mask1=None, label_mask2=None, algos=None):
         """
         Compare results of different masks to each other on patient by patient basis.
         Plot results out with bar chart.
@@ -819,6 +849,7 @@ class ResultsContainer(object):
         :param mask1_name: mask name based on masks obtained from `get_masks`
         :param mask2_name: mask name based on masks obtained from `get_masks`
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param label_mask1: custom label in legend for mask1
         :param label_mask2: custom label in legend for mask2
         :param algos: specific algos to analyze. If not set, defaults to all.
@@ -836,14 +867,19 @@ class ResultsContainer(object):
             pp1 = pp1[pp1.algo.isin(algos)]
             pp2 = pp2[pp2.algo.isin(algos)]
 
-        ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing)
-        ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing)
+        ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing, std_or_mad)
+        ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing, std_or_mad)
 
-        ad_df, std_df = self._create_per_patient_comparison_frames(ad_std1, ad_std2, 'Breath Types', mask1_name, mask2_name)
+        ad_df, std_df = self._create_per_patient_comparison_frames(ad_std1, ad_std2, 'Breath Types', mask1_name, mask2_name, std_or_mad)
+
+        if std_or_mad == 'std':
+            ylabel = 'Standard Deviation'
+        elif std_or_mad == 'mad':
+            ylabel = 'Median Absolute Deviation'
 
         fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3*8, 3*3))
         sns.barplot(x='Algorithm', y='Absolute Difference', hue='Breath Types', data=ad_df, ax=axes[0])
-        sns.barplot(x='Algorithm', y='Standard Deviation', hue='Breath Types', data=std_df, ax=axes[1])
+        sns.barplot(x='Algorithm', y=ylabel, hue='Breath Types', data=std_df, ax=axes[1])
 
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
@@ -856,7 +892,7 @@ class ResultsContainer(object):
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
-    def compare_patient_level_masks_scatter(self, mask1_name, mask2_name, windowing, individual_patients=False, std_lim=None):
+    def compare_patient_level_masks_scatter(self, mask1_name, mask2_name, windowing, std_or_mad, individual_patients=False, std_lim=None):
         """
         Compare results of different masks to each other on patient by patient basis.
         Plot results out with scatter plots as usual.
@@ -864,6 +900,7 @@ class ResultsContainer(object):
         :param mask1_name: mask name based on masks obtained from `get_masks`
         :param mask2_name: mask name based on masks obtained from `get_masks`
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param individual_patients: show individual_patients scatter points
         :param std_lim: limit graphs by standard deviation within certain
                         factor. Normally is set to None (no limit). But can be
@@ -876,8 +913,8 @@ class ResultsContainer(object):
         pp1 = self.analyze_per_patient_df(self.proc_results[mask1])
         pp2 = self.analyze_per_patient_df(self.proc_results[mask2])
 
-        ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing)
-        ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing)
+        ad_std1 = self.preprocess_ad_std_in_df(pp1, windowing, std_or_mad)
+        ad_std2 = self.preprocess_ad_std_in_df(pp2, windowing, std_or_mad)
 
         ad_std = copy(ad_std1)
         for algo in pp1.algo.unique():
@@ -887,8 +924,7 @@ class ResultsContainer(object):
         plt_title = '{} vs {}'.format(mask1_name, mask2_name)
         figname = '{}_vs_{}-scatter-windowing-{}-mins-{}.png'.format(mask1_name, mask2_name, windowing, self.n_minutes)
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(mask1_name, mask2_name)
-        ylabel = 'Standard Deviation ($\sigma$) of Algo'
-        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=xlabel)
 
     def compare_breath_level_masks(self, mask1_name, mask2_name, windowing, algos=None):
         """
@@ -964,6 +1000,12 @@ class ResultsContainer(object):
 
     def compare_breath_level_on_ventmode_monte_carlo(self, n_resamples, algos=None):
         """
+        Compare algos based on mode. Compares resampled results from mode agnostic
+        algos if there are algo restrictions. If no algo restrictions, then
+        compare all possible algos.
+
+        :param n_resamples: number of times to resample non-async/async data
+        :param algos: list of algos to sample
         """
         if not self.no_algo_restrict and algos is None:
             algos = set(self.algos_used).difference(FileCalculations.algos_unavailable_for_pc_prvc).difference(FileCalculations.algos_unavailable_for_vc)
@@ -1020,7 +1062,7 @@ class ResultsContainer(object):
                 super_frame = super_frame.append(frame)
 
         sns.barplot(x='variable', y='value', data=super_frame, hue='Minutes')
-        plt.ylabel('{}Difference (Algo - Compliance)'.format('Absolute ' if absolute else ''))
+        plt.ylabel('{}Difference ({})'.format('Absolute ' if absolute else ''), '$|C_{rs}^k-\hat{C_{rs}^k} $' if absolute else '')
         plt.xlabel('Algorithm')
         xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
         plt.setp(xtick_names, rotation=90)
@@ -1079,7 +1121,7 @@ class ResultsContainer(object):
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
-    def compare_window_strategies_bar_per_patient(self, windowing1, windowing2, label_mask1=None, label_mask2=None):
+    def compare_window_strategies_bar_per_patient(self, windowing1, windowing2, std_or_mad, label_mask1=None, label_mask2=None):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts. Confidence intervals here tend to be quite
@@ -1087,6 +1129,7 @@ class ResultsContainer(object):
 
         :param windowing1: window type to use first ('wmd', 'smd', or None)
         :param windowing2: window type to use second ('wmd', 'smd', or None)
+        :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param label_mask1: custom label in legend for mask1
         :param label_mask2: custom label in legend for mask2
         """
@@ -1095,8 +1138,8 @@ class ResultsContainer(object):
         sns.set_style('whitegrid')
         pp = self.analyze_per_patient_df(self.proc_results)
 
-        ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1)
-        ad_std2 = self.preprocess_ad_std_in_df(pp, windowing2)
+        ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1, std_or_mad)
+        ad_std2 = self.preprocess_ad_std_in_df(pp, windowing2, std_or_mad)
 
         window_names = {None: 'No windowing', 'wmd': 'WMD', 'smd': 'SMD'}
         win1 = window_names[windowing1]
@@ -1104,10 +1147,15 @@ class ResultsContainer(object):
 
         fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(3*8, 3*3))
         # create frame for absolute diff
-        ad_df, std_df = self._create_per_patient_comparison_frames(ad_std1, ad_std2, 'Window Strategy', win1, win2)
+        ad_df, std_df = self._create_per_patient_comparison_frames(ad_std1, ad_std2, 'Window Strategy', win1, win2, std_or_mad)
+
+        if std_or_mad == 'std':
+            dev = 'Standard Deviation'
+        elif std_or_mad == 'mad':
+            dev = 'Median Absolute Deviation'
 
         sns.barplot(x='Algorithm', y='Absolute Difference', hue='Window Strategy', data=ad_df, ax=axes[0], palette='Set2')
-        sns.barplot(x='Algorithm', y='Standard Deviation', hue='Window Strategy', data=std_df, ax=axes[1], palette='Set2')
+        sns.barplot(x='Algorithm', y=dev, hue='Window Strategy', data=std_df, ax=axes[1], palette='Set2')
 
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
@@ -1121,13 +1169,14 @@ class ResultsContainer(object):
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
-    def compare_window_lengths_bar_per_patient(self, windowing, windows=[5, 10, 20, 50, 100, 200]):
+    def compare_window_lengths_bar_per_patient(self, windowing, std_or_mad, windows=[5, 10, 20, 50, 100, 200]):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts. Confidence intervals here tend to be quite
         wide because our current n is 18. Future work can improve upon this number.
 
         :param windowing: window type to use ('wmd', 'smd')
+        :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param windows: window lengths to compare
         """
         def show_ad_std_plot(data, ycolname, legend):
@@ -1148,11 +1197,11 @@ class ResultsContainer(object):
         sns.set_style('whitegrid')
 
         pp = self.analyze_per_patient_df(self.proc_results)
-        ad_stds = {'None': self.preprocess_ad_std_in_df(pp, None)}
+        ad_stds = {'None': self.preprocess_ad_std_in_df(pp, None, std_or_mad)}
         for win_size in windows:
             self.set_new_window_n(win_size)
             pp = self.analyze_per_patient_df(self.proc_results)
-            ad_stds[win_size] = self.preprocess_ad_std_in_df(pp, windowing)
+            ad_stds[win_size] = self.preprocess_ad_std_in_df(pp, windowing, std_or_mad)
 
         window_names = {'wmd': 'WMD', 'smd': 'SMD'}
         win = window_names[windowing]
@@ -1171,19 +1220,26 @@ class ResultsContainer(object):
                 algo_name = FileCalculations.shorthand_name_mapping[algo]
                 for val in items[1]:
                     std_rows.append([algo_name, val, size])
+
+        if std_or_mad == 'std':
+            ylabel = 'Standard Deviation'
+        elif std_or_mad == 'mad':
+            ylabel = 'Median Absolute Deviation'
+
         ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', 'Window Size'])
-        std_df = pd.DataFrame(std_rows, columns=['Algorithm', 'Standard Deviation', 'Window Size'])
+        std_df = pd.DataFrame(std_rows, columns=['Algorithm', ylabel, 'Window Size'])
 
         show_ad_std_plot(ad_df, 'Absolute Difference', False)
-        show_ad_std_plot(std_df, 'Standard Deviation', True)
+        show_ad_std_plot(std_df, ylabel, True)
 
-    def compare_window_strategies_scatter_per_patient(self, windowing1, windowing2, individual_patients=False, std_lim=None):
+    def compare_window_strategies_scatter_per_patient(self, windowing1, windowing2, std_or_mad, individual_patients=False, std_lim=None):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with scatter plots as usual.
 
         :param windowing1: window type to use first ('wmd', 'smd', or None)
         :param windowing2: window type to use second ('wmd', 'smd', or None)
+        :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param individual_patients: show individual_patients scatter points
         :param std_lim: limit graphs by standard deviation within certain
                         factor. Normally is set to None (no limit). But can be
@@ -1191,8 +1247,8 @@ class ResultsContainer(object):
         """
         pp = self.analyze_per_patient_df(self.proc_results)
 
-        ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1)
-        ad_std2 = self.preprocess_ad_std_in_df(pp, windowing2)
+        ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1, std_or_mad)
+        ad_std2 = self.preprocess_ad_std_in_df(pp, windowing2, std_or_mad)
 
         ad_std = copy(ad_std1)
         for algo in ad_std1.keys():
@@ -1203,7 +1259,7 @@ class ResultsContainer(object):
         plt_title = '{} vs {}'.format(name_mapping[windowing1], name_mapping[windowing2])
         figname = '{}_vs_{}-scatter-mins-{}.png'.format(windowing1, windowing2, self.n_minutes)
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(name_mapping[windowing1], name_mapping[windowing2])
-        self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim, custom_xlabel=xlabel)
+        self._ad_std_scatter(ad_std, 'window_compr', plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=xlabel)
 
     def extract_medians_and_iqr(self, df, windowing, absolute=False):
         """
@@ -1551,13 +1607,14 @@ class ResultsContainer(object):
             )),
         }
 
-    def preprocess_ad_std_in_df(self, df, windowing):
-        # this function is really not necessary. But its here, and it does save on
-        # some complexity of computing things in the graphing function itself, like
-        # performing some nan filtering and doing dataset slicing
+    def preprocess_ad_std_in_df(self, df, windowing, std_or_mad):
+        """
+        In patient processed frames, extract descriptive statistics on the patient-level
+        such as mean diffs and MAD or std deviation.
+        """
         algos = sorted(list(df.algo.unique()))
         ad_std = {algo: [[], [], None, None] for algo in algos}
-        ad_col, std_col = self._get_windowing_colnames(windowing)
+        ad_col, dev_col = self._get_windowing_colnames(windowing, std_or_mad)
 
         for algo in algos:
             nan_mask = df[df.algo==algo][ad_col].isna()
@@ -1566,13 +1623,13 @@ class ResultsContainer(object):
                 continue
             non_nan = df[df.algo==algo][~nan_mask]
             ad_std[algo][0] = non_nan[ad_col]
-            ad_std[algo][1] = non_nan[std_col]
+            ad_std[algo][1] = non_nan[dev_col]
             ad_std[algo][2] = np.mean(ad_std[algo][0])
             ad_std[algo][3] = np.mean(ad_std[algo][1])
 
         return ad_std
 
-    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, algos=None):
+    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, algos=None):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
@@ -1580,8 +1637,8 @@ class ResultsContainer(object):
         """
         if algos is not None:
             df = df[df.algo.isin(algos)]
-        ad_std = self.preprocess_ad_std_in_df(df, windowing)
-        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim)
+        ad_std = self.preprocess_ad_std_in_df(df, windowing, std_or_mad)
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad)
 
     def plot_algo_ad_std_boxplots(self, df, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
@@ -1934,11 +1991,12 @@ class ResultsContainer(object):
             windowing,
         )
 
-    def plot_per_patient_results(self, windowing, individual_patients=False, show_boxplots=True, std_lim=None):
+    def plot_per_patient_results(self, windowing, std_or_mad, individual_patients=False, show_boxplots=True, std_lim=None):
         """
         Plot patient by patient results
 
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param individual_patients: show individual_patients scatter points
         :param show_boxplots: show boxplots after scatter plots
         :param std_lim: limit graphs by standard deviation within certain
@@ -1953,7 +2011,8 @@ class ResultsContainer(object):
             'Patient by patient results. No filters',
             windowing_mod('patient_by_patient_result.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['all'][self.window_n], windowing, 'patient_by_patient')
@@ -1965,7 +2024,8 @@ class ResultsContainer(object):
             'Patient by patient results. No Asynchronies',
             windowing_mod('patient_by_patient_no_async_result.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['no_async'][self.window_n], windowing, 'patient_by_patient_no_async')
@@ -1977,7 +2037,8 @@ class ResultsContainer(object):
             'Patient by patient results. Asynchronies only',
             windowing_mod('patient_by_patient_asynchronies_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['async'][self.window_n], windowing, 'asynchronies_only_pbp')
@@ -1989,7 +2050,8 @@ class ResultsContainer(object):
             'Patient by patient results. VC only',
             windowing_mod('patient_by_patient_vc_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['vc_only'][self.window_n], windowing, 'vc_only_pbp')
@@ -2001,7 +2063,8 @@ class ResultsContainer(object):
             'Patient by patient results. VC, No Asynchronies',
             windowing_mod('patient_by_patient_vc_no_asynchronies.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # VC only, asynchronies only
@@ -2011,7 +2074,8 @@ class ResultsContainer(object):
             'Patient by patient results. VC Asynchronies only',
             windowing_mod('patient_by_patient_vc_asynchronies_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # PC only patient by patient.
@@ -2021,7 +2085,8 @@ class ResultsContainer(object):
             'Patient by patient results. PC only',
             windowing_mod('patient_by_patient_pc_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['pc_only'][self.window_n], windowing, 'pc_only_pbp')
@@ -2033,7 +2098,8 @@ class ResultsContainer(object):
             'Patient by patient results. PC, No Asynchronies',
             windowing_mod('patient_by_patient_pc_no_asynchronies.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # PC only, asynchronies only
@@ -2043,7 +2109,8 @@ class ResultsContainer(object):
             'Patient by patient results. PC Asynchronies only',
             windowing_mod('patient_by_patient_pc_asynchronies_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # PRVC only patient by patient.
@@ -2053,7 +2120,8 @@ class ResultsContainer(object):
             'Patient by patient results. PRVC only',
             windowing_mod('patient_by_patient_prvc_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['prvc_only'][self.window_n], windowing, 'prvc_only_pbp')
@@ -2065,7 +2133,8 @@ class ResultsContainer(object):
             'Patient by patient results. PRVC, No Asynchronies',
             windowing_mod('patient_by_patient_prvc_no_asynchronies.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # PRVC only, asynchronies only
@@ -2075,7 +2144,8 @@ class ResultsContainer(object):
             'Patient by patient results. PRVC Asynchronies only',
             windowing_mod('patient_by_patient_prvc_asynchronies_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # no efforting only
@@ -2085,7 +2155,8 @@ class ResultsContainer(object):
             'Patient by patient results. No Apparent Efforting',
             windowing_mod('patient_by_patient_no_efforting.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # early efforting only
@@ -2095,7 +2166,8 @@ class ResultsContainer(object):
             'Patient by patient results. Early Efforting',
             windowing_mod('patient_by_patient_early_efforting.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # insp efforting only
@@ -2105,7 +2177,8 @@ class ResultsContainer(object):
             'Patient by patient results. Inspiratory Efforting',
             windowing_mod('patient_by_patient_insp_efforting.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # exp efforting only
@@ -2115,7 +2188,8 @@ class ResultsContainer(object):
             'Patient by patient results. Expiratory Efforting',
             windowing_mod('patient_by_patient_exp_efforting.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # all efforting only
@@ -2125,7 +2199,8 @@ class ResultsContainer(object):
             'Patient by patient results. All Efforting',
             windowing_mod('patient_by_patient_all_efforting.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # PC/PRVC only
@@ -2135,7 +2210,8 @@ class ResultsContainer(object):
             'Patient by patient results. PC/PRVC only',
             windowing_mod('patient_by_patient_pc_prvc_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         if show_boxplots:
@@ -2148,7 +2224,8 @@ class ResultsContainer(object):
             'Patient by patient results. Artifacts only',
             windowing_mod('patient_by_patient_artifacts_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # group asynchronies/artifacts by mode
@@ -2158,7 +2235,8 @@ class ResultsContainer(object):
             'Patient by patient results. Pressure Mode Asynchronies only',
             windowing_mod('patient_by_patient_pressure_mode_asynchronies_only.png', windowing),
             individual_patients,
-            std_lim
+            std_lim,
+            std_or_mad,
         )
 
         # I go back and forth in between questioning whether this belongs here or in per_patient
