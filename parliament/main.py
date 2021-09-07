@@ -78,8 +78,10 @@ class ResultsContainer(object):
         self.algo_colors = {}
         self.pp_frames = {}
         self.bb_frames = {}
+        self.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
+        self.label_diff = 'Difference ($C_{rs}^k-\hat{C}_{rs}^k$)'
 
-    def _compare_breath_level_masks(self, df1, df2, windowing, algos, mask1_name, mask2_name, figname):
+    def _compare_breath_level_masks(self, df1, df2, windowing, algos, mask1_name, mask2_name, figname, **kwargs):
         """
         Private method for comparing breath by breath masks.
         """
@@ -98,20 +100,21 @@ class ResultsContainer(object):
         df = pd.concat([bb1, bb2])
         df = df.rename(columns={'variable': 'algo'})
 
-        fig, ax = plt.subplots(figsize=(3*8, 3*3))
+        fig, ax = plt.subplots(figsize=kwargs.get('figsize', (3*8, 3*3)))
 
         # alphabetical order again
         algos_in_order = sorted([algo.replace(diff_colname_suffix, '') for algo in sorted_diff_cols])
-        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette='Set2')
-        xtick_names = plt.setp(ax, xticklabels=algos_in_order)
-        plt.setp(xtick_names, rotation=60, fontsize=14)
+        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette=kwargs.get('palette', 'Set2'))
+        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(algos_in_order)])
+        plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
+        plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
         xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
-        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
-        ax.set_xlabel('Algorithm', fontsize=16)
-        ax.legend(fontsize=16)
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=kwargs.get('lw', 3))
+        ax.set_ylabel(self.label_diff, fontsize=kwargs.get('label_fontsize', 18))
+        ax.set_xlabel('')
+        ax.legend(fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'))
         title = '{} vs {}'.format(mask1_name, mask2_name)
-        ax.set_title(title, fontsize=20)
+        ax.set_title(title, fontsize=kwargs.get('title_fontsize', 18))
 
         proc_frame = self.extract_medians_and_iqr(df1, windowing)
         self._show_breath_by_breath_algo_table(proc_frame, mask1_name)
@@ -522,15 +525,15 @@ class ResultsContainer(object):
         """
         results_dir = Path(__file__).parent.joinpath('results', experiment_name)
         cls = pd.read_pickle(results_dir.joinpath('ResultsContainer_mins_{}.pkl'.format(n_minutes)))
-        # a bit dirty, but some older analyses dont have this attr
-        try:
-            cls.scatter_marker_symbols
-        except AttributeError:
-            cls.scatter_marker_symbols = [
-                'o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H',
-                '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
-                '$\dag$', '$\ddag$', '$\P$'
-            ]
+        # a bit dirty, but some older analyses dont have these attr
+        cls.scatter_marker_symbols = [
+            'o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H',
+            '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
+            '$\dag$', '$\ddag$', '$\P$'
+        ]
+        cls.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
+        cls.label_diff = 'Difference ($C_{rs}^k-\hat{C}_{rs}^k$)'
+
         return cls
 
     def add_results_df(self, patient, dataframe):
@@ -926,7 +929,7 @@ class ResultsContainer(object):
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(mask1_name, mask2_name)
         self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=xlabel)
 
-    def compare_breath_level_masks(self, mask1_name, mask2_name, windowing, algos=None):
+    def compare_breath_level_masks(self, mask1_name, mask2_name, windowing, algos=None, **kwargs):
         """
         Compare results of different masks to each other on breath by breath results.
 
@@ -947,9 +950,10 @@ class ResultsContainer(object):
             mask1_name.replace('_', ' '),
             mask2_name.replace('_', ' '),
             figname,
+            **kwargs,
         )
 
-    def compare_breath_level_async_v_no_async_monte_carlo(self, n_resamples, mode, algos=None, asynchrony_type=None):
+    def compare_breath_level_async_v_no_async_monte_carlo(self, n_resamples, mode, algos=None, asynchrony_type=None, **kwargs):
         """
         Compare breath-level algo performance for asynchronies v no asynchronies by
         resampling asynchronous and non-asynchronous breathing n number times. Performs
@@ -996,9 +1000,10 @@ class ResultsContainer(object):
             'Normal',
             'Asynchronous',
             'breath_by_breath_async_v_no_async_monte_carlo_{}_resamps.png'.format(n_resamples),
+            **kwargs,
         )
 
-    def compare_breath_level_on_ventmode_monte_carlo(self, n_resamples, algos=None):
+    def compare_breath_level_on_ventmode_monte_carlo(self, n_resamples, algos=None, **kwargs):
         """
         Compare algos based on mode. Compares resampled results from mode agnostic
         algos if there are algo restrictions. If no algo restrictions, then
@@ -1026,6 +1031,7 @@ class ResultsContainer(object):
             'Volume Control',
             'Pressure Control',
             'breath_by_breath_compare_algos_by_mode_monte_carlo_{}_resamps.png'.format(n_resamples),
+            **kwargs,
         )
 
     def compare_plat_minutes_bar_per_breath(self, windowing, win_size=20, n_minutes=[5, 10, 15, 30], absolute=True):
