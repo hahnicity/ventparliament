@@ -79,6 +79,49 @@ class ResultsContainer(object):
         self.pp_frames = {}
         self.bb_frames = {}
 
+    def _compare_breath_level_masks(self, df1, df2, windowing, algos, mask1_name, mask2_name, figname):
+        """
+        Private method for comparing breath by breath masks.
+        """
+        figname = str(self.results_dir.joinpath(figname).resolve())
+        algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used) if algos is None else algos
+        if windowing in ['smd', 'wmd']:
+            diff_colname_suffix = '_{}_{}'.format(windowing, self.window_n)
+        else:
+            diff_colname_suffix = '_diff'
+        sorted_diff_cols = sorted(["{}{}".format(algo, diff_colname_suffix) for algo in algos_in_frame])
+
+        bb1 = df1[sorted_diff_cols].melt()
+        bb2 = df2[sorted_diff_cols].melt()
+        bb1['Mask'] = mask1_name
+        bb2['Mask'] = mask2_name
+        df = pd.concat([bb1, bb2])
+        df = df.rename(columns={'variable': 'algo'})
+
+        fig, ax = plt.subplots(figsize=(3*8, 3*3))
+
+        # alphabetical order again
+        algos_in_order = sorted([algo.replace(diff_colname_suffix, '') for algo in sorted_diff_cols])
+        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette='Set2')
+        xtick_names = plt.setp(ax, xticklabels=algos_in_order)
+        plt.setp(xtick_names, rotation=60, fontsize=14)
+        xlim = ax.get_xlim()
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
+        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
+        ax.set_xlabel('Algorithm', fontsize=16)
+        ax.legend(fontsize=16)
+        title = '{} vs {}'.format(mask1_name, mask2_name)
+        ax.set_title(title, fontsize=20)
+
+        proc_frame = self.extract_medians_and_iqr(df1, windowing)
+        self._show_breath_by_breath_algo_table(proc_frame, mask1_name)
+
+        proc_frame = self.extract_medians_and_iqr(df2, windowing)
+        self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
+        plt.tight_layout()
+        plt.savefig(figname, dpi=self.dpi)
+        plt.show(fig)
+
     def _draw_seaborn_boxplot(self, data, ax, medians=None, palette=None, **kwargs):
         """
         Basically an exact replica of what happens in seaborn except for support of
@@ -734,6 +777,12 @@ class ResultsContainer(object):
 
         # filter out breaths with no ventmode
         self.proc_results.loc[(self.proc_results.ventmode.isna()) | (self.proc_results.ventmode == '')]
+        # if algo restrict then make sure that breaths are properly filtered by ventmode
+        if not self.no_algo_restrict:
+            for algo in FileCalculations.algos_unavailable_for_vc:
+                self.proc_results.loc[self.proc_results.ventmode == 'vc', algo] = np.nan
+            for algo in FileCalculations.algos_unavailable_for_pc_prvc:
+                self.proc_results.loc[self.proc_results.ventmode.isin(['pc', 'prvc']), algo] = np.nan
 
         # filter outliers by patient
         for algo in algos_used:
@@ -760,6 +809,7 @@ class ResultsContainer(object):
                 # automatically be removed in practice. Then keeping them in science
                 # will do no real good to inform the actual implementation science.
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
+        self.full_analysis_done = False
 
     def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing, label_mask1=None, label_mask2=None, algos=None):
         """
@@ -849,49 +899,92 @@ class ResultsContainer(object):
         :param windowing: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
         :param algos: list of algos to display
         """
-        algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used) if algos is None else algos
-        if windowing in ['smd', 'wmd']:
-            diff_colname_suffix = '_{}_{}'.format(windowing, self.window_n)
-        else:
-            diff_colname_suffix = '_diff'
-        sorted_diff_cols = sorted(["{}{}".format(algo, diff_colname_suffix) for algo in algos_in_frame])
-        figname = str(self.results_dir.joinpath('compare-breath-masks-{}-{}-windowing-{}-mins-{}.png'.format(mask1_name, mask2_name, windowing, self.n_minutes)).resolve())
-
+        figname = 'compare-breath-masks-{}-{}-windowing-{}-mins-{}.png'.format(mask1_name, mask2_name, windowing, self.n_minutes)
         masks = self.get_masks()
         mask1 = masks[mask1_name]
         mask2 = masks[mask2_name]
-        orig_bb1 = self.proc_results[mask1]
-        orig_bb2 = self.proc_results[mask2]
-        bb1 = orig_bb1[sorted_diff_cols].melt()
-        bb2 = orig_bb2[sorted_diff_cols].melt()
-        bb1['Mask'] = mask1_name.replace('_', ' ')
-        bb2['Mask'] = mask2_name.replace('_', ' ')
-        df = pd.concat([bb1, bb2])
-        df = df.rename(columns={'variable': 'algo'})
+        self._compare_breath_level_masks(
+            self.proc_results[mask1],
+            self.proc_results[mask2],
+            windowing,
+            algos,
+            mask1_name.replace('_', ' '),
+            mask2_name.replace('_', ' '),
+            figname,
+        )
 
-        fig, ax = plt.subplots(figsize=(3*8, 3*3))
+    def compare_breath_level_async_v_no_async_monte_carlo(self, n_resamples, mode, algos=None, asynchrony_type=None):
+        """
+        Compare breath-level algo performance for asynchronies v no asynchronies by
+        resampling asynchronous and non-asynchronous breathing n number times. Performs
+        operation by mode ('vc'/'pressure')
 
-        # alphabetical order again
-        algos_in_order = sorted([algo.replace(diff_colname_suffix, '') for algo in sorted_diff_cols])
-        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette='Set2')
-        xtick_names = plt.setp(ax, xticklabels=algos_in_order)
-        plt.setp(xtick_names, rotation=60, fontsize=14)
-        xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
-        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
-        ax.set_xlabel('Algorithm', fontsize=16)
-        ax.legend(fontsize=16)
-        title = '{} vs {}'.format(mask1_name, mask2_name)
-        ax.set_title(title, fontsize=20)
+        :param n_resamples: number of times to resample non-async/async data
+        :param mode: ventilation mode "vc"/"pressure"
+        :param algos: list of algos to sample
+        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_fam" "dca"
+        """
+        if mode not in ['vc', 'pressure']:
+            raise Exception('mode must be set to either "vc" or "pressure"')
 
-        proc_frame = self.extract_medians_and_iqr(orig_bb1, windowing)
-        self._show_breath_by_breath_algo_table(proc_frame, mask1_name)
+        if asynchrony_type is None:
+            vc_async_mask_name = 'vc_async_only_no_fam'
+            pc_async_mask_name = 'pc_prvc_async_only_no_fam'
+        elif asynchrony_type in ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_fam"]:
+            vc_async_mask_name = 'vc_{}_only'.format(asynchrony_type)
+            pc_async_mask_name = 'pc_prvc_{}_only'.format(asynchrony_type)
+        else:
+            raise Exception('asynchrony type {} is not valid choose from bsa, dta, fa_no_fam, fa_fam, OR dca')
 
-        proc_frame = self.extract_medians_and_iqr(orig_bb2, windowing)
-        self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
-        plt.tight_layout()
-        plt.savefig(figname, dpi=self.dpi)
-        plt.show(fig)
+        async_data_mask = {
+            'vc': self.get_masks()[vc_async_mask_name],
+            'pressure': self.get_masks()[pc_async_mask_name],
+        }[mode]
+        async_data = self.proc_results.loc[async_data_mask]
+        async_idxs = np.random.choice(async_data.index, size=n_resamples)
+        async_resampled = async_data.loc[async_idxs]
+
+        norm_data_mask = {
+            'vc': self.get_masks()['vc_no_async'],
+            'pressure': self.get_masks()['pc_prvc_no_async'],
+        }[mode]
+        norm_data = self.proc_results.loc[norm_data_mask]
+        norm_data_idxs = np.random.choice(norm_data.index, size=n_resamples)
+        norm_resampled = norm_data.loc[norm_data_idxs]
+
+        self._compare_breath_level_masks(
+            norm_resampled,
+            async_resampled,
+            None,
+            algos,
+            'Normal',
+            'Asynchronous',
+            'breath_by_breath_async_v_no_async_monte_carlo_{}_resamps.png'.format(n_resamples),
+        )
+
+    def compare_breath_level_on_ventmode_monte_carlo(self, n_resamples, algos=None):
+        """
+        """
+        if not self.no_algo_restrict and algos is None:
+            algos = set(self.algos_used).difference(FileCalculations.algos_unavailable_for_pc_prvc).difference(FileCalculations.algos_unavailable_for_vc)
+
+        vc_data = self.proc_results.loc[self.get_masks()['vc_only']]
+        vc_idxs = np.random.choice(vc_data.index, size=n_resamples)
+        vc_resampled = vc_data.loc[vc_idxs]
+
+        pressure_data = self.proc_results.loc[self.get_masks()['pc_prvc']]
+        pressure_idxs = np.random.choice(pressure_data.index, size=n_resamples)
+        pressure_resampled = pressure_data.loc[pressure_idxs]
+
+        self._compare_breath_level_masks(
+            vc_resampled,
+            pressure_resampled,
+            None,
+            algos,
+            'Volume Control',
+            'Pressure Control',
+            'breath_by_breath_compare_algos_by_mode_monte_carlo_{}_resamps.png'.format(n_resamples),
+        )
 
     def compare_plat_minutes_bar_per_breath(self, windowing, win_size=20, n_minutes=[5, 10, 15, 30], absolute=True):
         """
@@ -1400,8 +1493,40 @@ class ResultsContainer(object):
                 (self.proc_results.dyn_dca == 0) &
                 (self.proc_results.artifact == 0)
             )),
+            'pc_prvc_bsa_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.bsa != 0)
+            )),
+            'pc_prvc_dca_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
+            'pc_prvc_dta_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.dta != 0)
+            )),
+            'pc_prvc_fa_no_fam_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.fa > 1)
+            )),
+            'pc_prvc_fa_fam_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.fa == 1)
+            )),
             'prvc_only': (self.proc_results.ventmode == 'prvc'),
             'vc_only': (self.proc_results.ventmode == 'vc'),
+            'vc_bsa_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.bsa != 0)
+            )),
+            'vc_dca_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
+            'vc_dta_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.dta != 0)
+            )),
+            'vc_fa_no_fam_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.fa > 1)
+            )),
+            'vc_fa_fam_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.fa == 1)
+            )),
             'vc_async_only': ((self.proc_results.ventmode == 'vc') & (
                 (self.proc_results.dta != 0) |
                 (self.proc_results.bsa != 0) |
