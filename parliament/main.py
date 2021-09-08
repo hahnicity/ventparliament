@@ -108,11 +108,9 @@ class ResultsContainer(object):
         xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(algos_in_order)])
         plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
         plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
-        xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=kwargs.get('lw', 3))
         ax.set_ylabel(self.label_diff, fontsize=kwargs.get('label_fontsize', 18))
         ax.set_xlabel('')
-        ax.legend(fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'))
+        ax.legend(fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'), title=kwargs.get('legend_title', 'Breath Type'), title_fontsize=kwargs.get('legend_fontsize', 18))
         title = '{} vs {}'.format(mask1_name, mask2_name)
         ax.set_title(title, fontsize=kwargs.get('title_fontsize', 18))
 
@@ -121,6 +119,11 @@ class ResultsContainer(object):
 
         proc_frame = self.extract_medians_and_iqr(df2, windowing)
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
+
+        xlim = ax.get_xlim()
+        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=kwargs.get('lw', 3))
+        ylim = ax.get_ylim()
+        ax.set_ylim(kwargs.get('ylim', ylim))
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
@@ -962,19 +965,20 @@ class ResultsContainer(object):
         :param n_resamples: number of times to resample non-async/async data
         :param mode: ventilation mode "vc"/"pressure"
         :param algos: list of algos to sample
-        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_fam" "dca"
+        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_mild", "fa_mod", "fa_sev", "dca"
         """
         if mode not in ['vc', 'pressure']:
             raise Exception('mode must be set to either "vc" or "pressure"')
 
+        allowed_async_types = ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_mild", 'fa_mod', 'fa_sev']
         if asynchrony_type is None:
             vc_async_mask_name = 'vc_async_only_no_fam'
             pc_async_mask_name = 'pc_prvc_async_only_no_fam'
-        elif asynchrony_type in ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_fam"]:
+        elif asynchrony_type in allowed_async_types:
             vc_async_mask_name = 'vc_{}_only'.format(asynchrony_type)
             pc_async_mask_name = 'pc_prvc_{}_only'.format(asynchrony_type)
         else:
-            raise Exception('asynchrony type {} is not valid choose from bsa, dta, fa_no_fam, fa_fam, OR dca')
+            raise Exception('asynchrony type {} is not valid choose from {}'.format(asynchrony_type, ', '.join(allowed_async_types)))
 
         async_data_mask = {
             'vc': self.get_masks()[vc_async_mask_name],
@@ -1565,11 +1569,20 @@ class ResultsContainer(object):
             'pc_prvc_dta_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
                 (self.proc_results.dta != 0)
             )),
+            'pc_prvc_fa_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.fa != 0)
+            )),
+            'pc_prvc_fa_mild_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.fa == 1)
+            )),
+            'pc_prvc_fa_mod_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.fa == 2)
+            )),
+            'pc_prvc_fa_sev_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.fa == 3)
+            )),
             'pc_prvc_fa_no_fam_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
                 (self.proc_results.fa > 1)
-            )),
-            'pc_prvc_fa_fam_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
-                (self.proc_results.fa == 1)
             )),
             'prvc_only': (self.proc_results.ventmode == 'prvc'),
             'vc_only': (self.proc_results.ventmode == 'vc'),
@@ -1586,8 +1599,14 @@ class ResultsContainer(object):
             'vc_fa_no_fam_only': ((self.proc_results.ventmode == 'vc') & (
                 (self.proc_results.fa > 1)
             )),
-            'vc_fa_fam_only': ((self.proc_results.ventmode == 'vc') & (
+            'vc_fa_mild_only': ((self.proc_results.ventmode == 'vc') & (
                 (self.proc_results.fa == 1)
+            )),
+            'vc_fa_mod_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.fa == 2)
+            )),
+            'vc_fa_sev_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.fa == 3)
             )),
             'vc_async_only': ((self.proc_results.ventmode == 'vc') & (
                 (self.proc_results.dta != 0) |
