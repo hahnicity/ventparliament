@@ -261,7 +261,7 @@ class ResultsContainer(object):
             raise ValueError('windowing variable must be None, "wmd", or "smd"')
         return ad_col, dev_col
 
-    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=None, custom_ylabel=None):
+    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=None, custom_ylabel=None, **kwargs):
         """
         Perform scatter plot using with AD and std information for each algorithm.
         """
@@ -289,17 +289,17 @@ class ResultsContainer(object):
                 marker=algo_dict[algo]['m'],
                 color=algo_dict[algo]['c'],
                 label=algo if not individual_patients else None,
-                alpha=.9,
-                s=350,
+                alpha=kwargs.get('main_marker_alpha', .9),
+                s=kwargs.get('main_marker_size', 350),
                 edgecolors='black',
                 zorder=len(algos_in_order)+2-i,
-                linewidths=1,
+                linewidths=kwargs.get('main_marker_lw', 1),
             )
         x = [ad_std[a][2] for a in algos_in_order]
         y = [ad_std[a][3] for a in algos_in_order]
-        ax.tick_params(axis='x', labelsize=14)
-        ax.tick_params(axis='y', labelsize=14)
-        xlabel = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
+        ax.tick_params(axis='x', labelsize=kwargs.get('tick_fontsize', 14))
+        ax.tick_params(axis='y', labelsize=kwargs.get('tick_fontsize', 14))
+        xlabel = 'Median Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
         if custom_ylabel:
             ylabel = custom_ylabel
             dev_field_name = 'Standard Deviation (std)'
@@ -309,8 +309,8 @@ class ResultsContainer(object):
         elif std_or_mad == 'mad':
             ylabel = 'Median Absolute Deviation'
             dev_field_name = 'Median Absolute Deviation (MAD)'
-        ax.set_ylabel(ylabel, fontsize=22)
-        ax.set_xlabel(xlabel, fontsize=22)
+        ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 22))
+        ax.set_xlabel(xlabel, fontsize=kwargs.get('label_fontsize', 22))
         if std_lim is not None and len(x) > 1:
             ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
             ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
@@ -322,12 +322,12 @@ class ResultsContainer(object):
         ax.plot([0, 0], preset_ylim, color='black', zorder=0, lw=2)
         ax.set_xlim(preset_xlim)
         ax.set_ylim(preset_ylim)
-
         ax.set_title(plt_title, fontsize=20)
+        ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None))
 
         handles, labels = ax.get_legend_handles_labels()
         new_labels = [FileCalculations.shorthand_name_mapping[lab] for lab in labels]
-        fig.legend(handles, new_labels, fontsize=17, loc='center right', framealpha=0.4)
+        fig.legend(handles, new_labels, fontsize=kwargs.get('legend_fontsize', 17), loc=kwargs.get('legend_loc', 'center right'), framealpha=kwargs.get('legend_frame_alpha', .4), title=kwargs.get('legend_title', None), title_fontsize=kwargs.get('legend_fontsize', 17))
 
         # show table of scatter results
         table = PrettyTable()
@@ -520,6 +520,19 @@ class ResultsContainer(object):
 
         display(HTML('<h2>{}</h2>'.format(title)))
         display(HTML(soup.prettify()))
+
+    def _validate_async_mask_name_by_mode(self, mode, asynchrony_type):
+        if mode not in ['vc', 'pressure']:
+            raise Exception('mode must be set to either "vc" or "pressure"')
+
+        mode_prefix = 'vc' if mode == 'vc' else 'pc_prvc'
+        allowed_async_types = ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_mild", 'fa_mod', 'fa_sev']
+        if asynchrony_type is None:
+            return '{}_async_only_no_fam'.format(mode_prefix)
+        elif asynchrony_type in allowed_async_types:
+            return '{}_{}_only'.format(mode_prefix, asynchrony_type)
+        else:
+            raise Exception('asynchrony type {} is not valid choose from {}'.format(asynchrony_type, ', '.join(allowed_async_types)))
 
     @classmethod
     def load_from_experiment_name(cls, experiment_name, n_minutes):
@@ -847,6 +860,76 @@ class ResultsContainer(object):
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
         self.full_analysis_done = False
 
+    def compare_breath_level_async_types_by_ventmode_bar(self, mode, n_boot, std_or_mad, algos=None, asynchrony_type=None, absolute=True, **kwargs):
+        """
+        """
+        if algos is None:
+            algos = self.algos_used
+
+        if absolute:
+            abs_func = lambda x: x.abs()
+        else:
+            abs_func = lambda x: x
+        async_mask_name = self._validate_async_mask_name_by_mode(mode, asynchrony_type)
+        async_data_mask = self.get_masks()[async_mask_name]
+        async_data = self.proc_results.loc[async_data_mask]
+
+        norm_data_mask = self.get_masks()['{}_no_async'.format('vc' if mode == 'vc' else 'pc_prvc')]
+        norm_data = self.proc_results.loc[norm_data_mask]
+
+        async_mask_name = {
+            None: 'Asynchronous',
+            'fa_no_fam': 'Flow Async no Mild',
+            'fa': 'Flow Asynchrony',
+            'fa_mod': 'Flow Async Moderate',
+            'fa_mild': 'Flow Async Mild',
+            'fa_sev': 'Flow Async Severe',
+            'dta': 'Double Trigger Async',
+            'bsa': 'Breath Stacking Async',
+            'dca': 'Delayed Cycling Async',
+        }[asynchrony_type]
+        if std_or_mad == 'std':
+            dev_colname = 'Standard Deviation'
+            dev_estim = np.nanstd
+        elif std_or_mad == 'mad':
+            dev_colname = 'MAD'
+            dev_estim = lambda x: median_abs_deviation(x, nan_policy='omit')
+
+        rows = []
+        for algo in algos:
+            algo_name = FileCalculations.shorthand_name_mapping[algo]
+            algo_col = '{}_diff'.format(algo)
+            tmp_df_async = abs_func(async_data[[algo_col]]).rename(columns={algo_col: 'Median Absolute Difference'})
+            tmp_df_async['Algorithm'] = algo_name
+            tmp_df_async['Breath Type'] = async_mask_name
+            tmp_df_norm = abs_func(norm_data[[algo_col]]).rename(columns={algo_col: 'Median Absolute Difference'})
+            tmp_df_norm['Algorithm'] = algo_name
+            tmp_df_norm['Breath Type'] = 'Normal'
+            rows.extend([tmp_df_norm, tmp_df_async])
+        df = pd.concat(rows)
+        df = df.dropna()
+
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(3*8, 3*kwargs.get('figsize_height_mult', 5)))
+        sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[0], estimator=np.nanmedian, n_boot=n_boot, palette=kwargs.get('ax0_palette', 'Set1'))
+        sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[1], estimator=dev_estim, n_boot=n_boot, palette=kwargs.get('ax1_palette', 'Set2'))
+        axes[0].xaxis.set_major_locator(plt.NullLocator())
+        axes[0].set_ylabel('Median $|C_{rs}^k-\hat{C}_{rs}^k|$', fontsize=kwargs.get('label_fontsize', 16))
+        axes[0].set_ylim(kwargs.get('ax0_ylim', axes[0].get_ylim()))
+        #axes[1].get_legend().remove()
+        axes[1].set_ylabel(dev_colname, fontsize=kwargs.get('label_fontsize', 16))
+        axes[1].set_ylim(kwargs.get('ax1_ylim', axes[1].get_ylim()))
+        for ax in axes:
+            xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
+            plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 18))
+            plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
+            ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
+            ax.set_xlabel(None)
+            ax.legend(fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'), title=kwargs.get('legend_title', 'Breath Type'), title_fontsize=kwargs.get('legend_fontsize', 18))
+
+        figname = str(self.results_dir.joinpath('compare-breath-level-async-v-no-async-bar-mins-{}.png'.format(self.n_minutes)).resolve())
+        plt.tight_layout()
+        plt.savefig(figname, dpi=self.dpi)
+
     def compare_patient_level_masks_bar(self, mask1_name, mask2_name, windowing, std_or_mad, label_mask1=None, label_mask2=None, algos=None):
         """
         Compare results of different masks to each other on patient by patient basis.
@@ -960,30 +1043,18 @@ class ResultsContainer(object):
         """
         Compare breath-level algo performance for asynchronies v no asynchronies by
         resampling asynchronous and non-asynchronous breathing n number times. Performs
-        operation by mode ('vc'/'pressure')
+        operation by mode ('vc'/'pressure').
+
+        Not actually statistically meaningful, however it can give us a good idea of how our
+        algos are performing and where to focus on future efforts
 
         :param n_resamples: number of times to resample non-async/async data
         :param mode: ventilation mode "vc"/"pressure"
         :param algos: list of algos to sample
         :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_mild", "fa_mod", "fa_sev", "dca"
         """
-        if mode not in ['vc', 'pressure']:
-            raise Exception('mode must be set to either "vc" or "pressure"')
-
-        allowed_async_types = ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_mild", 'fa_mod', 'fa_sev']
-        if asynchrony_type is None:
-            vc_async_mask_name = 'vc_async_only_no_fam'
-            pc_async_mask_name = 'pc_prvc_async_only_no_fam'
-        elif asynchrony_type in allowed_async_types:
-            vc_async_mask_name = 'vc_{}_only'.format(asynchrony_type)
-            pc_async_mask_name = 'pc_prvc_{}_only'.format(asynchrony_type)
-        else:
-            raise Exception('asynchrony type {} is not valid choose from {}'.format(asynchrony_type, ', '.join(allowed_async_types)))
-
-        async_data_mask = {
-            'vc': self.get_masks()[vc_async_mask_name],
-            'pressure': self.get_masks()[pc_async_mask_name],
-        }[mode]
+        async_mask_name = self._validate_async_mask_name_by_mode(mode, asynchrony_type)
+        async_data_mask = self.get_masks()[async_mask_name]
         async_data = self.proc_results.loc[async_data_mask]
         async_idxs = np.random.choice(async_data.index, size=n_resamples)
         async_resampled = async_data.loc[async_idxs]
@@ -996,14 +1067,25 @@ class ResultsContainer(object):
         norm_data_idxs = np.random.choice(norm_data.index, size=n_resamples)
         norm_resampled = norm_data.loc[norm_data_idxs]
 
+        async_mask_name = {
+            None: 'Asynchronous',
+            'fa_no_fam': 'Flow Async no Mild',
+            'fa': 'Flow Asynchrony',
+            'fa_mod': 'Flow Async Moderate',
+            'fa_mild': 'Flow Async Mild',
+            'fa_sev': 'Flow Async Severe',
+            'dta': 'Double Trigger Async',
+            'bsa': 'Breath Stacking Async',
+            'dca': 'Delayed Cycling Async',
+        }[asynchrony_type]
         self._compare_breath_level_masks(
             norm_resampled,
             async_resampled,
             None,
             algos,
             'Normal',
-            'Asynchronous',
-            'breath_by_breath_async_v_no_async_monte_carlo_{}_resamps.png'.format(n_resamples),
+            async_mask_name,
+            'breath_by_breath_async_v_no_async_monte_carlo_{}_mode_{}_async_type_{}_resamps.png'.format(n_resamples, mode, asynchrony_type),
             **kwargs,
         )
 
@@ -1012,6 +1094,9 @@ class ResultsContainer(object):
         Compare algos based on mode. Compares resampled results from mode agnostic
         algos if there are algo restrictions. If no algo restrictions, then
         compare all possible algos.
+
+        Not actually statistically meaningful, however it can give us a good idea of how our
+        algos are performing and where to focus on future efforts
 
         :param n_resamples: number of times to resample non-async/async data
         :param algos: list of algos to sample
@@ -1072,7 +1157,7 @@ class ResultsContainer(object):
                 super_frame = super_frame.append(frame)
 
         sns.barplot(x='variable', y='value', data=super_frame, hue='Minutes')
-        plt.ylabel('{}Difference ({})'.format('Absolute ' if absolute else ''), '$|C_{rs}^k-\hat{C_{rs}^k} $' if absolute else '')
+        plt.ylabel('Median{}Difference ({})'.format(' Absolute ' if absolute else '', '$|C_{rs}^k-\hat{C}_{rs}^k|$' if absolute else ''))
         plt.xlabel('Algorithm')
         xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
         plt.setp(xtick_names, rotation=90)
@@ -1654,7 +1739,7 @@ class ResultsContainer(object):
 
         return ad_std
 
-    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, algos=None):
+    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, algos=None, **kwargs):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
@@ -1663,7 +1748,7 @@ class ResultsContainer(object):
         if algos is not None:
             df = df[df.algo.isin(algos)]
         ad_std = self.preprocess_ad_std_in_df(df, windowing, std_or_mad)
-        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad)
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, **kwargs)
 
     def plot_algo_ad_std_boxplots(self, df, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
@@ -2016,7 +2101,7 @@ class ResultsContainer(object):
             windowing,
         )
 
-    def plot_per_patient_results(self, windowing, std_or_mad, individual_patients=False, show_boxplots=True, std_lim=None):
+    def plot_per_patient_results(self, windowing, std_or_mad, individual_patients=False, show_boxplots=True, std_lim=None, **kwargs):
         """
         Plot patient by patient results
 
@@ -2038,6 +2123,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['all'][self.window_n], windowing, 'patient_by_patient')
@@ -2051,22 +2137,10 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['no_async'][self.window_n], windowing, 'patient_by_patient_no_async')
-
-        # Asynchronies only
-        self.plot_algo_scatter(
-            self.pp_frames['async'][self.window_n],
-            windowing,
-            'Patient by patient results. Asynchronies only',
-            windowing_mod('patient_by_patient_asynchronies_only.png', windowing),
-            individual_patients,
-            std_lim,
-            std_or_mad,
-        )
-        if show_boxplots:
-            self.plot_algo_ad_std_boxplots(self.pp_frames['async'][self.window_n], windowing, 'asynchronies_only_pbp')
 
         # VC only patient by patient.
         self.plot_algo_scatter(
@@ -2077,6 +2151,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['vc_only'][self.window_n], windowing, 'vc_only_pbp')
@@ -2090,17 +2165,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
-        )
-
-        # VC only, asynchronies only
-        self.plot_algo_scatter(
-            self.pp_frames['vc_only_async'][self.window_n],
-            windowing,
-            'Patient by patient results. VC Asynchronies only',
-            windowing_mod('patient_by_patient_vc_asynchronies_only.png', windowing),
-            individual_patients,
-            std_lim,
-            std_or_mad,
+            **kwargs,
         )
 
         # PC only patient by patient.
@@ -2112,6 +2177,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['pc_only'][self.window_n], windowing, 'pc_only_pbp')
@@ -2125,17 +2191,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
-        )
-
-        # PC only, asynchronies only
-        self.plot_algo_scatter(
-            self.pp_frames['pc_only_async'][self.window_n],
-            windowing,
-            'Patient by patient results. PC Asynchronies only',
-            windowing_mod('patient_by_patient_pc_asynchronies_only.png', windowing),
-            individual_patients,
-            std_lim,
-            std_or_mad,
+            **kwargs,
         )
 
         # PRVC only patient by patient.
@@ -2147,6 +2203,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['prvc_only'][self.window_n], windowing, 'prvc_only_pbp')
@@ -2160,17 +2217,20 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
 
-        # PRVC only, asynchronies only
+        # mode-agnostic algorithms only
         self.plot_algo_scatter(
-            self.pp_frames['prvc_only_async'][self.window_n],
+            self.pp_frames['all'][self.window_n],
             windowing,
-            'Patient by patient results. PRVC Asynchronies only',
-            windowing_mod('patient_by_patient_prvc_asynchronies_only.png', windowing),
+            'Patient by patient results. Mode Agnostic Algos',
+            windowing_mod('patient_by_patient_mode_agnostic_algos.png', windowing),
             individual_patients,
             std_lim,
             std_or_mad,
+            algos=(set(self.algos_used).difference(FileCalculations.algos_unavailable_for_pc_prvc)).difference(FileCalculations.algos_unavailable_for_vc),
+            **kwargs,
         )
 
         # no efforting only
@@ -2182,6 +2242,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
 
         # early efforting only
@@ -2193,6 +2254,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
 
         # insp efforting only
@@ -2204,6 +2266,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
 
         # exp efforting only
@@ -2215,6 +2278,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
 
         # all efforting only
@@ -2226,6 +2290,7 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
 
         # PC/PRVC only
@@ -2237,32 +2302,11 @@ class ResultsContainer(object):
             individual_patients,
             std_lim,
             std_or_mad,
+            **kwargs,
         )
 
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['all_pressure_only'][self.window_n], windowing, 'pressure_only_pbp')
-
-        # Artifacts only
-        self.plot_algo_scatter(
-            self.pp_frames['artifacts'][self.window_n],
-            windowing,
-            'Patient by patient results. Artifacts only',
-            windowing_mod('patient_by_patient_artifacts_only.png', windowing),
-            individual_patients,
-            std_lim,
-            std_or_mad,
-        )
-
-        # group asynchronies/artifacts by mode
-        self.plot_algo_scatter(
-            self.pp_frames['all_pressure_only_async'][self.window_n],
-            windowing,
-            'Patient by patient results. Pressure Mode Asynchronies only',
-            windowing_mod('patient_by_patient_pressure_mode_asynchronies_only.png', windowing),
-            individual_patients,
-            std_lim,
-            std_or_mad,
-        )
 
         # I go back and forth in between questioning whether this belongs here or in per_patient
         if show_boxplots:
@@ -2340,7 +2384,7 @@ class ResultsContainer(object):
             # save frame
             self.save_results()
 
-    def visualize_patients(self, patients, algos, extra_mask=None, ts_xlim=None, ts_ylim=None, windowing=None):
+    def visualize_patients(self, patients, algos, extra_mask=None, ts_xlim=None, ts_ylim=None, windowing=None, **kwargs):
         if algos == 'all':
             algos = self.algos_used
         algo_cols = algos
@@ -2375,6 +2419,7 @@ class ResultsContainer(object):
             '{}_custom_scatter_plot-windowing-{}-mins-{}.png'.format('-'.join(patients), windowing, self.n_minutes),
             False,
             None,
+            **kwargs,
         )
 
         # breath by breath results
