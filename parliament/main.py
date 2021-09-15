@@ -114,7 +114,7 @@ class ResultsContainer(object):
         fig, ax = plt.subplots(figsize=kwargs.get('figsize', (kwargs.get('fig_width', 3*8), kwargs.get('fig_height', 3*3))))
 
         # alphabetical order again
-        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette=kwargs.get('palette', 'Set2'), linewidth=kwargs.get('box_lw', None))
+        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette=kwargs.get('palette', 'Set2'), linewidth=kwargs.get('box_lw', None), zorder=kwargs.get('bar_zorder', 2))
         xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo._text] for algo in ax.get_xticklabels()])
         plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
         plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
@@ -122,7 +122,7 @@ class ResultsContainer(object):
         ax.set_xlabel('')
         ax.legend(fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'), title=kwargs.get('legend_title', 'Breath Type'), title_fontsize=kwargs.get('legend_fontsize', 18))
         title = '{} vs {}'.format(mask1_name, mask2_name)
-        ax.set_title(title, fontsize=kwargs.get('title_fontsize', 18))
+        ax.set_title(title, fontsize=kwargs.get('title_fontsize', 18), pad=25)
         ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
 
         proc_frame = self.extract_medians_and_iqr(df1, windowing1)
@@ -132,7 +132,8 @@ class ResultsContainer(object):
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
 
         xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=kwargs.get('lw', 3))
+        ax.plot(xlim, [0, 0], ls='--', zorder=kwargs.get('line_zorder', 0.9), c='red', lw=kwargs.get('lw', 3))
+        ax.set_xlim(xlim)
         ylim = ax.get_ylim()
         ax.set_ylim(kwargs.get('ylim', ylim))
         plt.tight_layout()
@@ -272,7 +273,7 @@ class ResultsContainer(object):
             raise ValueError('windowing variable must be None, "wmd", or "smd"')
         return ad_col, dev_col
 
-    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=None, custom_ylabel=None, **kwargs):
+    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=None, custom_ylabel=None, highlight_algos=None, **kwargs):
         """
         Perform scatter plot using with AD and std information for each algorithm.
         """
@@ -294,17 +295,27 @@ class ResultsContainer(object):
                 )
 
         for i, algo in enumerate(algos_in_order):
+            if highlight_algos and algo in highlight_algos:
+                s = kwargs.get('marker_hl_size', 500)
+                m_lw = kwargs.get('marker_hl_lw', 1)
+                m_ec = kwargs.get('marker_hl_ec', 'black')
+                m_alph = kwargs.get('marker_hl_alpha', .9)
+            else:
+                s = kwargs.get('main_marker_size', 350)
+                m_lw = kwargs.get('main_marker_lw', 1)
+                m_ec = 'black'
+                m_alph = kwargs.get('main_marker_alpha', .9)
             ax.scatter(
                 x=ad_std[algo][2],
                 y=ad_std[algo][3],
                 marker=algo_dict[algo]['m'],
                 color=algo_dict[algo]['c'],
                 label=algo if not individual_patients else None,
-                alpha=kwargs.get('main_marker_alpha', .9),
-                s=kwargs.get('main_marker_size', 350),
-                edgecolors='black',
+                alpha=m_alph,
+                s=s,
+                edgecolors=m_ec,
                 zorder=len(algos_in_order)+2-i,
-                linewidths=kwargs.get('main_marker_lw', 1),
+                linewidths=m_lw,
             )
         x = [ad_std[a][2] for a in algos_in_order]
         y = [ad_std[a][3] for a in algos_in_order]
@@ -318,10 +329,10 @@ class ResultsContainer(object):
             ylabel = 'Standard Deviation ($\sigma$)'
             dev_field_name = 'Standard Deviation (std)'
         elif std_or_mad == 'mad':
-            ylabel = 'Median Absolute Deviation'
+            ylabel = 'MAD'
             dev_field_name = 'Median Absolute Deviation (MAD)'
-        ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 22))
-        ax.set_xlabel(xlabel, fontsize=kwargs.get('label_fontsize', 22))
+        ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 22), labelpad=kwargs.get('ylabel_pad', 4.0))
+        ax.set_xlabel(xlabel, fontsize=kwargs.get('label_fontsize', 22), labelpad=kwargs.get('xlabel_pad', 4.0))
         if std_lim is not None and len(x) > 1:
             ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
             ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
@@ -333,7 +344,7 @@ class ResultsContainer(object):
         ax.plot([0, 0], preset_ylim, color='black', zorder=0, lw=2)
         ax.set_xlim(preset_xlim)
         ax.set_ylim(preset_ylim)
-        ax.set_title(plt_title, fontsize=20)
+        ax.set_title(plt_title, fontsize=20, pad=30)
         ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None))
 
         handles, labels = ax.get_legend_handles_labels()
@@ -537,8 +548,10 @@ class ResultsContainer(object):
             raise Exception('mode must be set to either "vc" or "pressure"')
 
         mode_prefix = 'vc' if mode == 'vc' else 'pc_prvc'
-        allowed_async_types = ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_mild", 'fa_mod', 'fa_sev', 'async_no_dca', 'async_no_fa']
+        allowed_async_types = ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_mild", 'fa_mod', 'fa_sev', 'async_no_dca', 'async_no_fa', 'async_no_fam']
         if asynchrony_type is None:
+            return '{}_async_only'.format(mode_prefix)
+        elif asynchrony_type == 'async_no_fam':
             return '{}_async_only_no_fam'.format(mode_prefix)
         elif asynchrony_type in allowed_async_types:
             return '{}_{}_only'.format(mode_prefix, asynchrony_type)
@@ -898,15 +911,15 @@ class ResultsContainer(object):
         norm_data = self.proc_results.loc[norm_data_mask]
 
         async_mask_name = {
-            None: 'Asynchronous',
-            'fa_no_fam': 'Flow Async no Mild',
-            'fa': 'Flow Asynchrony',
-            'fa_mod': 'Flow Async Moderate',
-            'fa_mild': 'Flow Async Mild',
-            'fa_sev': 'Flow Async Severe',
-            'dta': 'Double Trigger Async',
-            'bsa': 'Breath Stacking Async',
-            'dca': 'Delayed Cycling Async',
+            None: 'Asynchronous (no mild FA)' if mode == 'vc' else 'Asynchronous',
+            'fa_no_fam': 'Moderate/Severe FA',
+            'fa': 'FA',
+            'fa_mod': 'Moderate FA',
+            'fa_mild': 'Mild FA',
+            'fa_sev': 'Severe FA',
+            'dta': 'DTA',
+            'bsa': 'BSA',
+            'dca': 'DCA',
             'async_no_dca': 'Asynchronous, No DCA',
             'async_no_fa': 'Asynchronous, No FA',
         }[asynchrony_type]
@@ -1075,7 +1088,7 @@ class ResultsContainer(object):
         :param n_resamples: number of times to resample non-async/async data. If None then do not resample
         :param mode: ventilation mode "vc"/"pressure"
         :param algos: list of algos to sample
-        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_mild", "fa_mod", "fa_sev", "dca"
+        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_mild", "fa_mod", "fa_sev", "dca", "async_no_fam"
         """
         async_mask_name = self._validate_async_mask_name_by_mode(mode, asynchrony_type)
         async_data_mask = self.get_masks()[async_mask_name]
@@ -1095,6 +1108,7 @@ class ResultsContainer(object):
 
         async_mask_name = {
             None: 'Asynchronous',
+            'async_no_fam': 'Asynchronous (no mild FA)',
             'fa_no_fam': 'Flow Async no Mild',
             'fa': 'Flow Asynchrony',
             'fa_mod': 'Flow Async Moderate',
@@ -1701,6 +1715,13 @@ class ResultsContainer(object):
                 (self.proc_results.artifact == 0)
             )),
             'pc_prvc': self.proc_results.ventmode.isin(['pc', 'prvc']),
+            'pc_prvc_async_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa != 0) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
             'pc_prvc_async_only_no_fam': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
                 (self.proc_results.dta != 0) |
                 (self.proc_results.bsa != 0) |
@@ -1803,7 +1824,7 @@ class ResultsContainer(object):
 
         return ad_std
 
-    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, algos=None, **kwargs):
+    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, algos=None, highlight_algos=None, **kwargs):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
@@ -1812,7 +1833,7 @@ class ResultsContainer(object):
         if algos is not None:
             df = df[df.algo.isin(algos)]
         ad_std = self.preprocess_ad_std_in_df(df, windowing, std_or_mad)
-        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, **kwargs)
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, highlight_algos=highlight_algos, **kwargs)
 
     def plot_algo_ad_std_boxplots(self, df, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
