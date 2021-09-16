@@ -247,6 +247,22 @@ class ResultsContainer(object):
         std_df = pd.DataFrame(std_rows, columns=['Algorithm', ylabel, hue_colname])
         return ad_df, std_df
 
+    def _get_async_mask_name_for_compare_breath_level_masks(self, asynchrony_type):
+        return {
+            None: 'Asynchronous',
+            'async_no_fam': 'Asynchronous (no mild FA)',
+            'fa_no_fam': 'Moderate/Severe FA',
+            'fa': 'FA',
+            'fa_mod': 'Moderate FA',
+            'fa_mild': 'Mild FA',
+            'fa_sev': 'Severe FA',
+            'dta': 'Double Trigger Asynchrony',
+            'bsa': 'Breath Stacking Asynchrony',
+            'dca': 'Delayed Cycling Asynchrony',
+            'async_no_dca': 'Asynchronous, No DCA',
+            'async_no_fa': 'Asynchronous, No FA',
+        }[asynchrony_type]
+
     def _get_windowing_algo_diff_colnames(self, windowing):
         algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used)
         if windowing in ['smd', 'wmd']:
@@ -910,19 +926,7 @@ class ResultsContainer(object):
         norm_data_mask = self.get_masks()['{}_no_async'.format('vc' if mode == 'vc' else 'pc_prvc')]
         norm_data = self.proc_results.loc[norm_data_mask]
 
-        async_mask_name = {
-            None: 'Asynchronous (no mild FA)' if mode == 'vc' else 'Asynchronous',
-            'fa_no_fam': 'Moderate/Severe FA',
-            'fa': 'FA',
-            'fa_mod': 'Moderate FA',
-            'fa_mild': 'Mild FA',
-            'fa_sev': 'Severe FA',
-            'dta': 'DTA',
-            'bsa': 'BSA',
-            'dca': 'DCA',
-            'async_no_dca': 'Asynchronous, No DCA',
-            'async_no_fa': 'Asynchronous, No FA',
-        }[asynchrony_type]
+        async_mask_name = self._get_async_mask_name_for_compare_breath_level_masks(asynchrony_type)
         if std_or_mad == 'std':
             dev_colname = 'Standard Deviation'
             dev_estim = np.nanstd
@@ -1106,20 +1110,7 @@ class ResultsContainer(object):
             norm_data_idxs = np.random.choice(norm_data.index, size=n_resamples)
             norm_data = norm_data.loc[norm_data_idxs]
 
-        async_mask_name = {
-            None: 'Asynchronous',
-            'async_no_fam': 'Asynchronous (no mild FA)',
-            'fa_no_fam': 'Flow Async no Mild',
-            'fa': 'Flow Asynchrony',
-            'fa_mod': 'Flow Async Moderate',
-            'fa_mild': 'Flow Async Mild',
-            'fa_sev': 'Flow Async Severe',
-            'dta': 'Double Trigger Async',
-            'bsa': 'Breath Stacking Async',
-            'dca': 'Delayed Cycling Async',
-            'async_no_dca': 'Asynchronous, No DCA',
-            'async_no_fa': 'Asynchronous, No FA',
-        }[asynchrony_type]
+        async_mask_name = self._get_async_mask_name_for_compare_breath_level_masks(asynchrony_type)
         self._compare_breath_level_masks(
             norm_data,
             async_data,
@@ -1350,7 +1341,7 @@ class ResultsContainer(object):
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
-    def compare_window_lengths_bar_per_patient(self, windowing, std_or_mad, windows=[5, 10, 20, 50, 100, 200]):
+    def compare_window_lengths_bar_per_patient(self, windowing, std_or_mad, windows=[5, 10, 20, 50, 100, 200], **kwargs):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts. Confidence intervals here tend to be quite
@@ -1360,16 +1351,23 @@ class ResultsContainer(object):
         :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param windows: window lengths to compare
         """
-        def show_ad_std_plot(data, ycolname, legend):
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(3*8, 3*3))
+        def show_ad_std_plot(data, ycolname, legend, **kwargs):
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(kwargs.get('fig_width', 3*8), kwargs.get('fig_height', 3*3)))
             sns.barplot(x='Algorithm', y=ycolname, data=data, ax=ax, hue='Window Size', n_boot=self.boot_resamples)
-            xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
-            plt.setp(xtick_names, rotation=75)
+            plt.setp(ax.get_xticklabels(), rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
+            plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
+            if ylabel == 'Absolute Difference':
+
+                ax.set_ylabel('Median $|C_{rs}^k-\hat{C}_{rs}^k|$', fontsize=kwargs.get('label_fontsize', 18))
+            else:
+                ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 18))
+            ax.set_xlabel('')
             if not legend:
                 ax.get_legend().remove()
             else:
-                ax.legend(loc='upper left', title='Window Size', framealpha=0.4)
+                ax.legend(loc=kwargs.get('legend_loc', 'upper left'), title='Window Size', framealpha=kwargs.get('legend_alpha', 0.4), fontsize=kwargs.get('legend_fontsize', 22), title_fontsize=kwargs.get('legend_fontsize', 22))
 
+            ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
             plt.tight_layout()
             fig.savefig(self.results_dir.joinpath('compare_per_patient_win_lens_{}_mins_{}.png'.format(ycolname.replace(' ', '_'), self.n_minutes)).resolve(), dpi=self.dpi)
             plt.show(fig)
@@ -1405,13 +1403,12 @@ class ResultsContainer(object):
         if std_or_mad == 'std':
             ylabel = 'Standard Deviation'
         elif std_or_mad == 'mad':
-            ylabel = 'Median Absolute Deviation'
-
+            ylabel = 'MAD'
         ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', 'Window Size'])
         std_df = pd.DataFrame(std_rows, columns=['Algorithm', ylabel, 'Window Size'])
 
-        show_ad_std_plot(ad_df, 'Absolute Difference', False)
-        show_ad_std_plot(std_df, ylabel, True)
+        show_ad_std_plot(ad_df, 'Absolute Difference', False, **kwargs)
+        show_ad_std_plot(std_df, ylabel, True, **kwargs)
 
     def compare_window_strategies_scatter_per_patient(self, windowing1, windowing2, std_or_mad, individual_patients=False, std_lim=None):
         """
