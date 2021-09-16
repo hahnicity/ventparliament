@@ -28,6 +28,8 @@ from skimage.util.shape import view_as_windows
 
 from parliament.analyze import FileCalculations
 
+tc_pat = re.compile(r'_(ar|bru|fuz|ikd|lrn|vic|wri)')
+
 
 def _rolling_func(vals, win_size, func):
     strides = view_as_windows(vals, (win_size,), step=1)
@@ -80,6 +82,38 @@ class ResultsContainer(object):
         self.bb_frames = {}
         self.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
         self.label_diff = 'Difference ($C_{rs}^k-\hat{C}_{rs}^k$)'
+        self.scatter_marker_symbols = {
+            'al_rawas': 'o',
+            'al_rawas_ar': 'o',
+            'al_rawas_bru': 'o',
+            'al_rawas_fuz': 'o',
+            'al_rawas_ikd': 'o',
+            'al_rawas_lren': 'o',
+            'al_rawas_vic': 'o',
+            'al_rawas_wri': 'o',
+            'ft_insp_lstsq': 'v',
+            'howe_lstsq': '^',
+            'iimipr': '<',
+            'iipr': '>',
+            'iipredator': 's',
+            'kannangara': 'p',
+            'major': '*',
+            'mipr': 'h',
+            'polynomial': 'P',
+            'predator': 'X',
+            'pt_exp_lstsq': 'D',
+            'pt_insp_lstsq': 'd',
+            'vicario_co': 'H',
+            'vicario_nieap': '$\Join$',
+            'vicario_nieap_ar': '$\Join$',
+            'vicario_nieap_bru': '$\Join$',
+            'vicario_nieap_fuz': '$\Join$',
+            'vicario_nieap_ikd': '$\Join$',
+            'vicario_nieap_lren': '$\Join$',
+            'vicario_nieap_vic': '$\Join$',
+            'vicario_nieap_wri': '$\Join$',
+
+        }
 
     def _compare_breath_level_masks(self, df1, df2, windowing1, windowing2, algos, mask1_name, mask2_name, figname, absolute, **kwargs):
         """
@@ -582,11 +616,38 @@ class ResultsContainer(object):
         results_dir = Path(__file__).parent.joinpath('results', experiment_name)
         cls = pd.read_pickle(results_dir.joinpath('ResultsContainer_mins_{}.pkl'.format(n_minutes)))
         # a bit dirty, but some older analyses dont have these attr
-        cls.scatter_marker_symbols = [
-            'o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H',
-            '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
-            '$\dag$', '$\ddag$', '$\P$'
-        ]
+        cls.scatter_marker_symbols = {
+            'al_rawas': 'o',
+            'al_rawas_ar': 'o',
+            'al_rawas_bru': 'o',
+            'al_rawas_fuz': 'o',
+            'al_rawas_ikd': 'o',
+            'al_rawas_lren': 'o',
+            'al_rawas_vic': 'o',
+            'al_rawas_wri': 'o',
+            'ft_insp_lstsq': 'v',
+            'howe_lstsq': '^',
+            'iimipr': '<',
+            'iipr': '>',
+            'iipredator': 's',
+            'kannangara': 'p',
+            'major': '*',
+            'mipr': 'h',
+            'polynomial': 'P',
+            'predator': 'X',
+            'pt_exp_lstsq': 'D',
+            'pt_insp_lstsq': 'd',
+            'vicario_co': 'H',
+            'vicario_nieap': '$\Join$',
+            'vicario_nieap_ar': 'D',
+            'vicario_nieap_bru': 'D',
+            'vicario_nieap_fuz': 'D',
+            'vicario_nieap_ikd': 'D',
+            'vicario_nieap_lren': 'D',
+            'vicario_nieap_vic': 'D',
+            'vicario_nieap_wri': 'D',
+
+        }
         cls.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
         cls.label_diff = 'Difference ($C_{rs}^k-\hat{C}_{rs}^k$)'
 
@@ -842,7 +903,7 @@ class ResultsContainer(object):
         :param n_minutes: n minutes to find a plateau pressure within range of breath start.
         """
         self.algos_used = algos_used
-        self.algo_markers = {algo: self.scatter_marker_symbols[i] for i, algo in enumerate(self.algos_used)}
+        self.algo_markers = {algo: self.scatter_marker_symbols[algo] for i, algo in enumerate(self.algos_used)}
         self.algo_colors = {algo: cc.cm.glasbey(i) for i, algo in enumerate(self.algos_used)}
         self.n_minutes = n_minutes
         proc_results = pd.concat(self.raw_results)
@@ -952,7 +1013,7 @@ class ResultsContainer(object):
         sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[0], estimator=np.nanmedian, palette=kwargs.get('ax0_palette', 'Set1'), linewidth=kwargs.get('bar_lw', 0.5), ci=None, edgecolor=kwargs.get('bar_ec', 'black'))
         sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[1], estimator=dev_estim, palette=kwargs.get('ax1_palette', 'Set2'), linewidth=kwargs.get('bar_lw', 1), ci=None, edgecolor=kwargs.get('bar_ec', 'black'))
         axes[0].xaxis.set_major_locator(plt.NullLocator())
-        axes[0].set_ylabel('Median $'+abs_label+'C_{rs}^k-\hat{C}_{rs}^k'+abs_label+'$', fontsize=kwargs.get('label_fontsize', 16))
+        axes[0].set_ylabel('Median $'+abs_label+'C_{rs}^k-\hat{C}_{rs}^k'+abs_label+'$', fontsize=kwargs.get('label_fontsize', 16), labelpad=kwargs.get('ylabel_pad', 4.0))
         axes[0].set_ylim(kwargs.get('ax0_ylim', axes[0].get_ylim()))
         #axes[1].get_legend().remove()
         axes[1].set_ylabel(dev_colname, fontsize=kwargs.get('label_fontsize', 16))
@@ -1356,11 +1417,11 @@ class ResultsContainer(object):
             sns.barplot(x='Algorithm', y=ycolname, data=data, ax=ax, hue='Window Size', n_boot=self.boot_resamples)
             plt.setp(ax.get_xticklabels(), rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
             plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
-            if ylabel == 'Absolute Difference':
+            if ycolname == 'Absolute Difference':
 
-                ax.set_ylabel('Median $|C_{rs}^k-\hat{C}_{rs}^k|$', fontsize=kwargs.get('label_fontsize', 18))
+                ax.set_ylabel('Median $|C_{rs}^k-\hat{C}_{rs}^k|$', fontsize=kwargs.get('label_fontsize', 18), labelpad=kwargs.get('ylabel_pad', 4.0))
             else:
-                ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 18))
+                ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 18), labelpad=kwargs.get('ylabel_pad', 4.0))
             ax.set_xlabel('')
             if not legend:
                 ax.get_legend().remove()
