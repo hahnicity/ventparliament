@@ -77,7 +77,37 @@ class ResultsContainer(object):
             '$\dag$', '$\ddag$', '$\P$'
         ]
         self.algo_markers = {}
-        self.algo_colors = {}
+        self.algo_colors = {
+            'al_rawas': cc.cm.glasbey(0),
+            'al_rawas_ar': cc.cm.glasbey(21),
+            'al_rawas_bru': cc.cm.glasbey(16),
+            'al_rawas_fuz': cc.cm.glasbey(17),
+            'al_rawas_ikd': cc.cm.glasbey(18),
+            'al_rawas_lren': cc.cm.glasbey(19),
+            'al_rawas_vic': cc.cm.glasbey(14),
+            'al_rawas_wri': cc.cm.glasbey(20),
+            'ft_insp_lstsq': cc.cm.glasbey(1),
+            'howe_lstsq': cc.cm.glasbey(2),
+            'iimipr': cc.cm.glasbey(3),
+            'iipr': cc.cm.glasbey(4),
+            'iipredator': cc.cm.glasbey(5),
+            'kannangara': cc.cm.glasbey(6),
+            'major': cc.cm.glasbey(7),
+            'mipr': cc.cm.glasbey(8),
+            'polynomial': cc.cm.glasbey(9),
+            'predator': cc.cm.glasbey(10),
+            'pt_exp_lstsq': cc.cm.glasbey(11),
+            'pt_insp_lstsq': cc.cm.glasbey(12),
+            'vicario_co': cc.cm.glasbey(13),
+            'vicario_nieap': cc.cm.glasbey(14),
+            'vicario_nieap_ar': cc.cm.glasbey(21),
+            'vicario_nieap_bru': cc.cm.glasbey(16),
+            'vicario_nieap_fuz': cc.cm.glasbey(17),
+            'vicario_nieap_ikd': cc.cm.glasbey(18),
+            'vicario_nieap_lren': cc.cm.glasbey(19),
+            'vicario_nieap_vic': cc.cm.glasbey(14),
+            'vicario_nieap_wri': cc.cm.glasbey(20),
+        }
         self.pp_frames = {}
         self.bb_frames = {}
         self.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
@@ -112,7 +142,6 @@ class ResultsContainer(object):
             'vicario_nieap_lren': '$\Join$',
             'vicario_nieap_vic': '$\Join$',
             'vicario_nieap_wri': '$\Join$',
-
         }
 
     def _compare_breath_level_masks(self, df1, df2, windowing1, windowing2, algos, mask1_name, mask2_name, figname, absolute, **kwargs):
@@ -174,14 +203,14 @@ class ResultsContainer(object):
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
-    def _draw_seaborn_boxplot(self, data, ax, medians=None, palette=None, **kwargs):
+    def _draw_seaborn_boxplot(self, data, ax, medians=None, palette=None, linewidth=None, **kwargs):
         """
         Basically an exact replica of what happens in seaborn except for support of
         usermedians
         """
         plotter = _BoxPlotter(x=None, y=None, hue=None, data=data, order=None, hue_order=None,
                               orient=None, color=None, palette=palette, saturation=.75, width=.8,
-                              dodge=True, fliersize=5, linewidth=None)
+                              dodge=True, fliersize=5, linewidth=linewidth)
         kwargs.update(dict(whis=1.5, showfliers=False))
         vert = plotter.orient == "v"
 
@@ -647,6 +676,37 @@ class ResultsContainer(object):
             'vicario_nieap_vic': 'D',
             'vicario_nieap_wri': 'D',
 
+        }
+        cls.algo_colors = {
+            'al_rawas': cc.cm.glasbey(0),
+            'al_rawas_ar': cc.cm.glasbey(21),
+            'al_rawas_bru': cc.cm.glasbey(16),
+            'al_rawas_fuz': cc.cm.glasbey(17),
+            'al_rawas_ikd': cc.cm.glasbey(18),
+            'al_rawas_lren': cc.cm.glasbey(19),
+            'al_rawas_vic': cc.cm.glasbey(14),
+            'al_rawas_wri': cc.cm.glasbey(20),
+            'ft_insp_lstsq': cc.cm.glasbey(1),
+            'howe_lstsq': cc.cm.glasbey(2),
+            'iimipr': cc.cm.glasbey(3),
+            'iipr': cc.cm.glasbey(4),
+            'iipredator': cc.cm.glasbey(5),
+            'kannangara': cc.cm.glasbey(6),
+            'major': cc.cm.glasbey(7),
+            'mipr': cc.cm.glasbey(8),
+            'polynomial': cc.cm.glasbey(9),
+            'predator': cc.cm.glasbey(10),
+            'pt_exp_lstsq': cc.cm.glasbey(11),
+            'pt_insp_lstsq': cc.cm.glasbey(12),
+            'vicario_co': cc.cm.glasbey(13),
+            'vicario_nieap': cc.cm.glasbey(14),
+            'vicario_nieap_ar': cc.cm.glasbey(21),
+            'vicario_nieap_bru': cc.cm.glasbey(16),
+            'vicario_nieap_fuz': cc.cm.glasbey(17),
+            'vicario_nieap_ikd': cc.cm.glasbey(18),
+            'vicario_nieap_lren': cc.cm.glasbey(19),
+            'vicario_nieap_vic': cc.cm.glasbey(14),
+            'vicario_nieap_wri': cc.cm.glasbey(20),
         }
         cls.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
         cls.label_diff = 'Difference ($C_{rs}^k-\hat{C}_{rs}^k$)'
@@ -1914,7 +1974,7 @@ class ResultsContainer(object):
         plt.tight_layout()
         fig.savefig(self.results_dir.joinpath('{}_std_windowing_{}_boxplot_result-mins-{}.png'.format(windowing, figname_prefix, self.n_minutes)).resolve(), dpi=self.dpi)
 
-    def show_individual_breath_by_breath_frame_results(self, df, figname, windowing):
+    def show_individual_breath_by_breath_frame_results(self, df, figname, windowing, **kwargs):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         algos_in_frame = set(df.columns).intersection(self.algos_used)
         if windowing is None:
@@ -1931,16 +1991,21 @@ class ResultsContainer(object):
             proc_frame.medians.values,
             notch=False,
             bootstrap=None,
-            palette=[self.algo_colors[algo] for algo in algos_in_order]
+            palette=[self.algo_colors[algo] for algo in algos_in_order],
+            linewidth=kwargs.get('box_lw', None),
         )
-        xtick_names = plt.setp(ax, xticklabels=algos_in_order)
-        plt.setp(xtick_names, rotation=60, fontsize=14)
+        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
+        plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 18))
+        plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 18))
         xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
-        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
-        ax.set_xlabel('Algorithm', fontsize=16)
+        ax.plot(xlim, [0, 0], ls='--', zorder=0.9, c='red', lw=kwargs.get('lw', 4))
+        ax.set_xlim(xlim)
+        ax.set_xlabel('')
+        ax.set_ylabel(self.label_diff, fontsize=kwargs.get('label_fontsize', 16))
         title = figname.replace('.png', '').replace('_', ' ').replace('-', ': ')
-        ax.set_title(title, fontsize=20)
+        ax.set_title(title, fontsize=20, pad=25.0)
+        ax.grid(False)
+        ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
         plt.tight_layout()
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
@@ -2144,7 +2209,7 @@ class ResultsContainer(object):
         """
         self._perform_single_window_analysis(self.proc_results, absolute, winsorizor, algos, robust, robust_and_reg, show_median)
 
-    def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[], windowing=None):
+    def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[], windowing=None, **kwargs):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
         exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
         windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}-mins-{}.png'.format(y, self.n_minutes))
@@ -2152,96 +2217,132 @@ class ResultsContainer(object):
             exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
             windowing_mod('breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('vc_only_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('vc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('vc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_only_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('prvc_only_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('prvc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('prvc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('no_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['early_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('early_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['insp_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('insp_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['exp_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('exp_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('all_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_prvc_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_prvc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_prvc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
 
     def plot_per_patient_results(self, windowing, std_or_mad, individual_patients=False, show_boxplots=True, std_lim=None, **kwargs):
