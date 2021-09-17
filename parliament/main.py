@@ -28,6 +28,8 @@ from skimage.util.shape import view_as_windows
 
 from parliament.analyze import FileCalculations
 
+tc_pat = re.compile(r'_(ar|bru|fuz|ikd|lrn|vic|wri)')
+
 
 def _rolling_func(vals, win_size, func):
     strides = view_as_windows(vals, (win_size,), step=1)
@@ -75,67 +77,140 @@ class ResultsContainer(object):
             '$\dag$', '$\ddag$', '$\P$'
         ]
         self.algo_markers = {}
-        self.algo_colors = {}
+        self.algo_colors = {
+            'al_rawas': cc.cm.glasbey(0),
+            'al_rawas_ar': cc.cm.glasbey(21),
+            'al_rawas_bru': cc.cm.glasbey(16),
+            'al_rawas_fuz': cc.cm.glasbey(17),
+            'al_rawas_ikd': cc.cm.glasbey(18),
+            'al_rawas_lren': cc.cm.glasbey(19),
+            'al_rawas_vic': cc.cm.glasbey(14),
+            'al_rawas_wri': cc.cm.glasbey(20),
+            'ft_insp_lstsq': cc.cm.glasbey(1),
+            'howe_lstsq': cc.cm.glasbey(2),
+            'iimipr': cc.cm.glasbey(3),
+            'iipr': cc.cm.glasbey(4),
+            'iipredator': cc.cm.glasbey(5),
+            'kannangara': cc.cm.glasbey(6),
+            'major': cc.cm.glasbey(7),
+            'mipr': cc.cm.glasbey(8),
+            'polynomial': cc.cm.glasbey(9),
+            'predator': cc.cm.glasbey(10),
+            'pt_exp_lstsq': cc.cm.glasbey(11),
+            'pt_insp_lstsq': cc.cm.glasbey(12),
+            'vicario_co': cc.cm.glasbey(13),
+            'vicario_nieap': cc.cm.glasbey(14),
+            'vicario_nieap_ar': cc.cm.glasbey(21),
+            'vicario_nieap_bru': cc.cm.glasbey(16),
+            'vicario_nieap_fuz': cc.cm.glasbey(17),
+            'vicario_nieap_ikd': cc.cm.glasbey(18),
+            'vicario_nieap_lren': cc.cm.glasbey(19),
+            'vicario_nieap_vic': cc.cm.glasbey(14),
+            'vicario_nieap_wri': cc.cm.glasbey(20),
+        }
         self.pp_frames = {}
         self.bb_frames = {}
         self.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
         self.label_diff = 'Difference ($C_{rs}^k-\hat{C}_{rs}^k$)'
+        self.scatter_marker_symbols = {
+            'al_rawas': 'o',
+            'al_rawas_ar': 'o',
+            'al_rawas_bru': 'o',
+            'al_rawas_fuz': 'o',
+            'al_rawas_ikd': 'o',
+            'al_rawas_lren': 'o',
+            'al_rawas_vic': 'o',
+            'al_rawas_wri': 'o',
+            'ft_insp_lstsq': 'v',
+            'howe_lstsq': '^',
+            'iimipr': '<',
+            'iipr': '>',
+            'iipredator': 's',
+            'kannangara': 'p',
+            'major': '*',
+            'mipr': 'h',
+            'polynomial': 'P',
+            'predator': 'X',
+            'pt_exp_lstsq': 'D',
+            'pt_insp_lstsq': 'd',
+            'vicario_co': 'H',
+            'vicario_nieap': '$\Join$',
+            'vicario_nieap_ar': '$\Join$',
+            'vicario_nieap_bru': '$\Join$',
+            'vicario_nieap_fuz': '$\Join$',
+            'vicario_nieap_ikd': '$\Join$',
+            'vicario_nieap_lren': '$\Join$',
+            'vicario_nieap_vic': '$\Join$',
+            'vicario_nieap_wri': '$\Join$',
+        }
 
-    def _compare_breath_level_masks(self, df1, df2, windowing, algos, mask1_name, mask2_name, figname, **kwargs):
+    def _compare_breath_level_masks(self, df1, df2, windowing1, windowing2, algos, mask1_name, mask2_name, figname, absolute, **kwargs):
         """
         Private method for comparing breath by breath masks.
         """
         figname = str(self.results_dir.joinpath(figname).resolve())
         algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used) if algos is None else algos
-        if windowing in ['smd', 'wmd']:
-            diff_colname_suffix = '_{}_{}'.format(windowing, self.window_n)
-        else:
-            diff_colname_suffix = '_diff'
-        sorted_diff_cols = sorted(["{}{}".format(algo, diff_colname_suffix) for algo in algos_in_frame])
 
-        bb1 = df1[sorted_diff_cols].melt()
-        bb2 = df2[sorted_diff_cols].melt()
+        if windowing1 in ['smd', 'wmd']:
+            diff_colname_suffix1 = '_{}_{}'.format(windowing1, self.window_n)
+        else:
+            diff_colname_suffix1 = '_diff'
+
+        if windowing2 in ['smd', 'wmd']:
+            diff_colname_suffix2 = '_{}_{}'.format(windowing2, self.window_n)
+        else:
+            diff_colname_suffix2 = '_diff'
+        sorted_diff_cols1 = sorted(["{}{}".format(algo, diff_colname_suffix1) for algo in algos_in_frame])
+        sorted_diff_cols2 = sorted(["{}{}".format(algo, diff_colname_suffix2) for algo in algos_in_frame])
+
+        bb1 = df1[sorted_diff_cols1].melt()
+        bb2 = df2[sorted_diff_cols2].melt()
         bb1['Mask'] = mask1_name
         bb2['Mask'] = mask2_name
         df = pd.concat([bb1, bb2])
         df = df.rename(columns={'variable': 'algo'})
+        df = df.dropna()
+        if absolute:
+            df['value'] = df['value'].abs()
+        df.algo = df.algo.str.replace('(_diff|_(wmd|smd)_\d+)', '')
 
-        fig, ax = plt.subplots(figsize=kwargs.get('figsize', (3*8, 3*3)))
+        fig, ax = plt.subplots(figsize=kwargs.get('figsize', (kwargs.get('fig_width', 3*8), kwargs.get('fig_height', 3*3))))
 
         # alphabetical order again
-        algos_in_order = sorted([algo.replace(diff_colname_suffix, '') for algo in sorted_diff_cols])
-        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette=kwargs.get('palette', 'Set2'))
-        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(algos_in_order)])
+        sns.boxplot(x='algo', y='value', data=df, hue='Mask', ax=ax, notch=False, bootstrap=None, showfliers=False, palette=kwargs.get('palette', 'Set2'), linewidth=kwargs.get('box_lw', None), zorder=kwargs.get('bar_zorder', 2))
+        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo._text] for algo in ax.get_xticklabels()])
         plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
         plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
         ax.set_ylabel(self.label_diff, fontsize=kwargs.get('label_fontsize', 18))
         ax.set_xlabel('')
         ax.legend(fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'), title=kwargs.get('legend_title', 'Breath Type'), title_fontsize=kwargs.get('legend_fontsize', 18))
         title = '{} vs {}'.format(mask1_name, mask2_name)
-        ax.set_title(title, fontsize=kwargs.get('title_fontsize', 18))
+        ax.set_title(title, fontsize=kwargs.get('title_fontsize', 18), pad=25)
+        ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
 
-        proc_frame = self.extract_medians_and_iqr(df1, windowing)
+        proc_frame = self.extract_medians_and_iqr(df1, windowing1)
         self._show_breath_by_breath_algo_table(proc_frame, mask1_name)
 
-        proc_frame = self.extract_medians_and_iqr(df2, windowing)
+        proc_frame = self.extract_medians_and_iqr(df2, windowing2)
         self._show_breath_by_breath_algo_table(proc_frame, mask2_name)
 
         xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red', lw=kwargs.get('lw', 3))
+        ax.plot(xlim, [0, 0], ls='--', zorder=kwargs.get('line_zorder', 0.9), c='red', lw=kwargs.get('lw', 3))
+        ax.set_xlim(xlim)
         ylim = ax.get_ylim()
         ax.set_ylim(kwargs.get('ylim', ylim))
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
-    def _draw_seaborn_boxplot(self, data, ax, medians=None, palette=None, **kwargs):
+    def _draw_seaborn_boxplot(self, data, ax, medians=None, palette=None, linewidth=None, **kwargs):
         """
         Basically an exact replica of what happens in seaborn except for support of
         usermedians
         """
         plotter = _BoxPlotter(x=None, y=None, hue=None, data=data, order=None, hue_order=None,
                               orient=None, color=None, palette=palette, saturation=.75, width=.8,
-                              dodge=True, fliersize=5, linewidth=None)
+                              dodge=True, fliersize=5, linewidth=linewidth)
         kwargs.update(dict(whis=1.5, showfliers=False))
         vert = plotter.orient == "v"
 
@@ -235,6 +310,22 @@ class ResultsContainer(object):
         std_df = pd.DataFrame(std_rows, columns=['Algorithm', ylabel, hue_colname])
         return ad_df, std_df
 
+    def _get_async_mask_name_for_compare_breath_level_masks(self, asynchrony_type):
+        return {
+            None: 'Asynchronous',
+            'async_no_fam': 'Asynchronous (no mild FA)',
+            'fa_no_fam': 'Moderate/Severe FA',
+            'fa': 'FA',
+            'fa_mod': 'Moderate FA',
+            'fa_mild': 'Mild FA',
+            'fa_sev': 'Severe FA',
+            'dta': 'Double Trigger Asynchrony',
+            'bsa': 'Breath Stacking Asynchrony',
+            'dca': 'Delayed Cycling Asynchrony',
+            'async_no_dca': 'Asynchronous, No DCA',
+            'async_no_fa': 'Asynchronous, No FA',
+        }[asynchrony_type]
+
     def _get_windowing_algo_diff_colnames(self, windowing):
         algos_in_frame = set(self.proc_results.columns).intersection(self.algos_used)
         if windowing in ['smd', 'wmd']:
@@ -261,7 +352,7 @@ class ResultsContainer(object):
             raise ValueError('windowing variable must be None, "wmd", or "smd"')
         return ad_col, dev_col
 
-    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=None, custom_ylabel=None, **kwargs):
+    def _ad_std_scatter(self, ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=None, custom_ylabel=None, highlight_algos=None, **kwargs):
         """
         Perform scatter plot using with AD and std information for each algorithm.
         """
@@ -283,17 +374,27 @@ class ResultsContainer(object):
                 )
 
         for i, algo in enumerate(algos_in_order):
+            if highlight_algos and algo in highlight_algos:
+                s = kwargs.get('marker_hl_size', 500)
+                m_lw = kwargs.get('marker_hl_lw', 1)
+                m_ec = kwargs.get('marker_hl_ec', 'black')
+                m_alph = kwargs.get('marker_hl_alpha', .9)
+            else:
+                s = kwargs.get('main_marker_size', 350)
+                m_lw = kwargs.get('main_marker_lw', 1)
+                m_ec = 'black'
+                m_alph = kwargs.get('main_marker_alpha', .9)
             ax.scatter(
                 x=ad_std[algo][2],
                 y=ad_std[algo][3],
                 marker=algo_dict[algo]['m'],
                 color=algo_dict[algo]['c'],
                 label=algo if not individual_patients else None,
-                alpha=kwargs.get('main_marker_alpha', .9),
-                s=kwargs.get('main_marker_size', 350),
-                edgecolors='black',
+                alpha=m_alph,
+                s=s,
+                edgecolors=m_ec,
                 zorder=len(algos_in_order)+2-i,
-                linewidths=kwargs.get('main_marker_lw', 1),
+                linewidths=m_lw,
             )
         x = [ad_std[a][2] for a in algos_in_order]
         y = [ad_std[a][3] for a in algos_in_order]
@@ -307,10 +408,10 @@ class ResultsContainer(object):
             ylabel = 'Standard Deviation ($\sigma$)'
             dev_field_name = 'Standard Deviation (std)'
         elif std_or_mad == 'mad':
-            ylabel = 'Median Absolute Deviation'
+            ylabel = 'MAD'
             dev_field_name = 'Median Absolute Deviation (MAD)'
-        ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 22))
-        ax.set_xlabel(xlabel, fontsize=kwargs.get('label_fontsize', 22))
+        ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 22), labelpad=kwargs.get('ylabel_pad', 4.0))
+        ax.set_xlabel(xlabel, fontsize=kwargs.get('label_fontsize', 22), labelpad=kwargs.get('xlabel_pad', 4.0))
         if std_lim is not None and len(x) > 1:
             ax.set_xlim(-.1, np.mean(x)+std_lim*np.std(x))
             ax.set_ylim(-.4, np.mean(y)+std_lim*np.std(y))
@@ -322,7 +423,7 @@ class ResultsContainer(object):
         ax.plot([0, 0], preset_ylim, color='black', zorder=0, lw=2)
         ax.set_xlim(preset_xlim)
         ax.set_ylim(preset_ylim)
-        ax.set_title(plt_title, fontsize=20)
+        ax.set_title(plt_title, fontsize=20, pad=30)
         ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None))
 
         handles, labels = ax.get_legend_handles_labels()
@@ -526,8 +627,10 @@ class ResultsContainer(object):
             raise Exception('mode must be set to either "vc" or "pressure"')
 
         mode_prefix = 'vc' if mode == 'vc' else 'pc_prvc'
-        allowed_async_types = ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_mild", 'fa_mod', 'fa_sev']
+        allowed_async_types = ['bsa', 'dta', 'fa_no_fam', 'dca', "fa_mild", 'fa_mod', 'fa_sev', 'async_no_dca', 'async_no_fa', 'async_no_fam']
         if asynchrony_type is None:
+            return '{}_async_only'.format(mode_prefix)
+        elif asynchrony_type == 'async_no_fam':
             return '{}_async_only_no_fam'.format(mode_prefix)
         elif asynchrony_type in allowed_async_types:
             return '{}_{}_only'.format(mode_prefix, asynchrony_type)
@@ -542,11 +645,69 @@ class ResultsContainer(object):
         results_dir = Path(__file__).parent.joinpath('results', experiment_name)
         cls = pd.read_pickle(results_dir.joinpath('ResultsContainer_mins_{}.pkl'.format(n_minutes)))
         # a bit dirty, but some older analyses dont have these attr
-        cls.scatter_marker_symbols = [
-            'o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'P', 'X', 'D', 'd', 'H',
-            '$\Join$', '$\clubsuit$', '$\spadesuit$', '$\heartsuit$', '$\$$',
-            '$\dag$', '$\ddag$', '$\P$'
-        ]
+        cls.scatter_marker_symbols = {
+            'al_rawas': 'o',
+            'al_rawas_ar': 'o',
+            'al_rawas_bru': 'o',
+            'al_rawas_fuz': 'o',
+            'al_rawas_ikd': 'o',
+            'al_rawas_lren': 'o',
+            'al_rawas_vic': 'o',
+            'al_rawas_wri': 'o',
+            'ft_insp_lstsq': 'v',
+            'howe_lstsq': '^',
+            'iimipr': '<',
+            'iipr': '>',
+            'iipredator': 's',
+            'kannangara': 'p',
+            'major': '*',
+            'mipr': 'h',
+            'polynomial': 'P',
+            'predator': 'X',
+            'pt_exp_lstsq': 'D',
+            'pt_insp_lstsq': 'd',
+            'vicario_co': 'H',
+            'vicario_nieap': '$\Join$',
+            'vicario_nieap_ar': 'D',
+            'vicario_nieap_bru': 'D',
+            'vicario_nieap_fuz': 'D',
+            'vicario_nieap_ikd': 'D',
+            'vicario_nieap_lren': 'D',
+            'vicario_nieap_vic': 'D',
+            'vicario_nieap_wri': 'D',
+
+        }
+        cls.algo_colors = {
+            'al_rawas': cc.cm.glasbey(0),
+            'al_rawas_ar': cc.cm.glasbey(21),
+            'al_rawas_bru': cc.cm.glasbey(16),
+            'al_rawas_fuz': cc.cm.glasbey(17),
+            'al_rawas_ikd': cc.cm.glasbey(18),
+            'al_rawas_lren': cc.cm.glasbey(19),
+            'al_rawas_vic': cc.cm.glasbey(14),
+            'al_rawas_wri': cc.cm.glasbey(20),
+            'ft_insp_lstsq': cc.cm.glasbey(1),
+            'howe_lstsq': cc.cm.glasbey(2),
+            'iimipr': cc.cm.glasbey(3),
+            'iipr': cc.cm.glasbey(4),
+            'iipredator': cc.cm.glasbey(5),
+            'kannangara': cc.cm.glasbey(6),
+            'major': cc.cm.glasbey(7),
+            'mipr': cc.cm.glasbey(8),
+            'polynomial': cc.cm.glasbey(9),
+            'predator': cc.cm.glasbey(10),
+            'pt_exp_lstsq': cc.cm.glasbey(11),
+            'pt_insp_lstsq': cc.cm.glasbey(12),
+            'vicario_co': cc.cm.glasbey(13),
+            'vicario_nieap': cc.cm.glasbey(14),
+            'vicario_nieap_ar': cc.cm.glasbey(21),
+            'vicario_nieap_bru': cc.cm.glasbey(16),
+            'vicario_nieap_fuz': cc.cm.glasbey(17),
+            'vicario_nieap_ikd': cc.cm.glasbey(18),
+            'vicario_nieap_lren': cc.cm.glasbey(19),
+            'vicario_nieap_vic': cc.cm.glasbey(14),
+            'vicario_nieap_wri': cc.cm.glasbey(20),
+        }
         cls.label_abs_diff = 'Absolute Difference ($|C_{rs}^k-\hat{C}_{rs}^k|$)'
         cls.label_diff = 'Difference ($C_{rs}^k-\hat{C}_{rs}^k$)'
 
@@ -802,7 +963,7 @@ class ResultsContainer(object):
         :param n_minutes: n minutes to find a plateau pressure within range of breath start.
         """
         self.algos_used = algos_used
-        self.algo_markers = {algo: self.scatter_marker_symbols[i] for i, algo in enumerate(self.algos_used)}
+        self.algo_markers = {algo: self.scatter_marker_symbols[algo] for i, algo in enumerate(self.algos_used)}
         self.algo_colors = {algo: cc.cm.glasbey(i) for i, algo in enumerate(self.algos_used)}
         self.n_minutes = n_minutes
         proc_results = pd.concat(self.raw_results)
@@ -860,16 +1021,25 @@ class ResultsContainer(object):
                 self.proc_results.loc[df[df[algo].abs() >= (algo_median + 30*algo_mad)].index, algo] = np.nan
         self.full_analysis_done = False
 
-    def compare_breath_level_async_types_by_ventmode_bar(self, mode, n_boot, std_or_mad, algos=None, asynchrony_type=None, absolute=True, **kwargs):
+    def compare_breath_level_async_types_by_ventmode_bar(self, mode, std_or_mad, algos=None, asynchrony_type=None, absolute=True, **kwargs):
         """
+        Compare asynchrony types by ventmode on breath level.
+
+        :param mode: ventilation mode "vc"/"pressure"
+        :param std_or_mad: use standard deviation ('std') or MAD ('mad')
+        :param algos: list of algos to sample
+        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_mild", "fa_mod", "fa_sev", "dca"
+        :param absolute: return absolute values for WMD calcs
         """
         if algos is None:
             algos = self.algos_used
 
         if absolute:
             abs_func = lambda x: x.abs()
+            abs_label = '|'
         else:
             abs_func = lambda x: x
+            abs_label = ''
         async_mask_name = self._validate_async_mask_name_by_mode(mode, asynchrony_type)
         async_data_mask = self.get_masks()[async_mask_name]
         async_data = self.proc_results.loc[async_data_mask]
@@ -877,17 +1047,7 @@ class ResultsContainer(object):
         norm_data_mask = self.get_masks()['{}_no_async'.format('vc' if mode == 'vc' else 'pc_prvc')]
         norm_data = self.proc_results.loc[norm_data_mask]
 
-        async_mask_name = {
-            None: 'Asynchronous',
-            'fa_no_fam': 'Flow Async no Mild',
-            'fa': 'Flow Asynchrony',
-            'fa_mod': 'Flow Async Moderate',
-            'fa_mild': 'Flow Async Mild',
-            'fa_sev': 'Flow Async Severe',
-            'dta': 'Double Trigger Async',
-            'bsa': 'Breath Stacking Async',
-            'dca': 'Delayed Cycling Async',
-        }[asynchrony_type]
+        async_mask_name = self._get_async_mask_name_for_compare_breath_level_masks(asynchrony_type)
         if std_or_mad == 'std':
             dev_colname = 'Standard Deviation'
             dev_estim = np.nanstd
@@ -910,10 +1070,10 @@ class ResultsContainer(object):
         df = df.dropna()
 
         fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(3*8, 3*kwargs.get('figsize_height_mult', 5)))
-        sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[0], estimator=np.nanmedian, n_boot=n_boot, palette=kwargs.get('ax0_palette', 'Set1'))
-        sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[1], estimator=dev_estim, n_boot=n_boot, palette=kwargs.get('ax1_palette', 'Set2'))
+        sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[0], estimator=np.nanmedian, palette=kwargs.get('ax0_palette', 'Set1'), linewidth=kwargs.get('bar_lw', 0.5), ci=None, edgecolor=kwargs.get('bar_ec', 'black'))
+        sns.barplot(x='Algorithm', y='Median Absolute Difference', hue='Breath Type', data=df, ax=axes[1], estimator=dev_estim, palette=kwargs.get('ax1_palette', 'Set2'), linewidth=kwargs.get('bar_lw', 1), ci=None, edgecolor=kwargs.get('bar_ec', 'black'))
         axes[0].xaxis.set_major_locator(plt.NullLocator())
-        axes[0].set_ylabel('Median $|C_{rs}^k-\hat{C}_{rs}^k|$', fontsize=kwargs.get('label_fontsize', 16))
+        axes[0].set_ylabel('Median $'+abs_label+'C_{rs}^k-\hat{C}_{rs}^k'+abs_label+'$', fontsize=kwargs.get('label_fontsize', 16), labelpad=kwargs.get('ylabel_pad', 4.0))
         axes[0].set_ylim(kwargs.get('ax0_ylim', axes[0].get_ylim()))
         #axes[1].get_legend().remove()
         axes[1].set_ylabel(dev_colname, fontsize=kwargs.get('label_fontsize', 16))
@@ -926,7 +1086,7 @@ class ResultsContainer(object):
             ax.set_xlabel(None)
             ax.legend(fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'), title=kwargs.get('legend_title', 'Breath Type'), title_fontsize=kwargs.get('legend_fontsize', 18))
 
-        figname = str(self.results_dir.joinpath('compare-breath-level-async-v-no-async-bar-mins-{}.png'.format(self.n_minutes)).resolve())
+        figname = str(self.results_dir.joinpath('compare-breath-level-async-v-no-async-bar-{}-{}-abs-{}-mins-{}.png'.format(mode, asynchrony_type, absolute, self.n_minutes)).resolve())
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
@@ -1015,7 +1175,7 @@ class ResultsContainer(object):
         xlabel = '({} larger)\u21C7\u21C7   |   \u21C9\u21C9({} larger)\n\nAbsolute Difference of (Compliance - Algo)'.format(mask1_name, mask2_name)
         self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, custom_xlabel=xlabel)
 
-    def compare_breath_level_masks(self, mask1_name, mask2_name, windowing, algos=None, **kwargs):
+    def compare_breath_level_masks(self, mask1_name, mask2_name, windowing, algos=None, absolute=False, **kwargs):
         """
         Compare results of different masks to each other on breath by breath results.
 
@@ -1032,14 +1192,16 @@ class ResultsContainer(object):
             self.proc_results[mask1],
             self.proc_results[mask2],
             windowing,
+            windowing,
             algos,
             mask1_name.replace('_', ' '),
             mask2_name.replace('_', ' '),
             figname,
+            absolute,
             **kwargs,
         )
 
-    def compare_breath_level_async_v_no_async_monte_carlo(self, n_resamples, mode, algos=None, asynchrony_type=None, **kwargs):
+    def compare_breath_level_async_v_no_async_monte_carlo(self, n_resamples, mode, algos=None, asynchrony_type=None, absolute=False, **kwargs):
         """
         Compare breath-level algo performance for asynchronies v no asynchronies by
         resampling asynchronous and non-asynchronous breathing n number times. Performs
@@ -1048,48 +1210,42 @@ class ResultsContainer(object):
         Not actually statistically meaningful, however it can give us a good idea of how our
         algos are performing and where to focus on future efforts
 
-        :param n_resamples: number of times to resample non-async/async data
+        :param n_resamples: number of times to resample non-async/async data. If None then do not resample
         :param mode: ventilation mode "vc"/"pressure"
         :param algos: list of algos to sample
-        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_mild", "fa_mod", "fa_sev", "dca"
+        :param asynchrony_type: analyze by specific asynchrony type options: "bsa", "dta", "fa_no_fam", "fa_mild", "fa_mod", "fa_sev", "dca", "async_no_fam"
         """
         async_mask_name = self._validate_async_mask_name_by_mode(mode, asynchrony_type)
         async_data_mask = self.get_masks()[async_mask_name]
         async_data = self.proc_results.loc[async_data_mask]
-        async_idxs = np.random.choice(async_data.index, size=n_resamples)
-        async_resampled = async_data.loc[async_idxs]
+        if n_resamples is not None:
+            async_idxs = np.random.choice(async_data.index, size=n_resamples)
+            async_data = async_data.loc[async_idxs]
 
         norm_data_mask = {
             'vc': self.get_masks()['vc_no_async'],
             'pressure': self.get_masks()['pc_prvc_no_async'],
         }[mode]
         norm_data = self.proc_results.loc[norm_data_mask]
-        norm_data_idxs = np.random.choice(norm_data.index, size=n_resamples)
-        norm_resampled = norm_data.loc[norm_data_idxs]
+        if n_resamples is not None:
+            norm_data_idxs = np.random.choice(norm_data.index, size=n_resamples)
+            norm_data = norm_data.loc[norm_data_idxs]
 
-        async_mask_name = {
-            None: 'Asynchronous',
-            'fa_no_fam': 'Flow Async no Mild',
-            'fa': 'Flow Asynchrony',
-            'fa_mod': 'Flow Async Moderate',
-            'fa_mild': 'Flow Async Mild',
-            'fa_sev': 'Flow Async Severe',
-            'dta': 'Double Trigger Async',
-            'bsa': 'Breath Stacking Async',
-            'dca': 'Delayed Cycling Async',
-        }[asynchrony_type]
+        async_mask_name = self._get_async_mask_name_for_compare_breath_level_masks(asynchrony_type)
         self._compare_breath_level_masks(
-            norm_resampled,
-            async_resampled,
+            norm_data,
+            async_data,
+            None,
             None,
             algos,
             'Normal',
             async_mask_name,
             'breath_by_breath_async_v_no_async_monte_carlo_{}_mode_{}_async_type_{}_resamps.png'.format(n_resamples, mode, asynchrony_type),
+            absolute,
             **kwargs,
         )
 
-    def compare_breath_level_on_ventmode_monte_carlo(self, n_resamples, algos=None, **kwargs):
+    def compare_breath_level_on_ventmode_monte_carlo(self, n_resamples, algos=None, absolute=False, **kwargs):
         """
         Compare algos based on mode. Compares resampled results from mode agnostic
         algos if there are algo restrictions. If no algo restrictions, then
@@ -1098,28 +1254,32 @@ class ResultsContainer(object):
         Not actually statistically meaningful, however it can give us a good idea of how our
         algos are performing and where to focus on future efforts
 
-        :param n_resamples: number of times to resample non-async/async data
+        :param n_resamples: number of times to resample non-async/async data. If None then do not resample
         :param algos: list of algos to sample
         """
         if not self.no_algo_restrict and algos is None:
             algos = set(self.algos_used).difference(FileCalculations.algos_unavailable_for_pc_prvc).difference(FileCalculations.algos_unavailable_for_vc)
 
         vc_data = self.proc_results.loc[self.get_masks()['vc_only']]
-        vc_idxs = np.random.choice(vc_data.index, size=n_resamples)
-        vc_resampled = vc_data.loc[vc_idxs]
+        if n_resamples is not None:
+            vc_idxs = np.random.choice(vc_data.index, size=n_resamples)
+            vc_data = vc_data.loc[vc_idxs]
 
         pressure_data = self.proc_results.loc[self.get_masks()['pc_prvc']]
-        pressure_idxs = np.random.choice(pressure_data.index, size=n_resamples)
-        pressure_resampled = pressure_data.loc[pressure_idxs]
+        if n_resamples is not None:
+            pressure_idxs = np.random.choice(pressure_data.index, size=n_resamples)
+            pressure_data = pressure_data.loc[pressure_idxs]
 
         self._compare_breath_level_masks(
-            vc_resampled,
-            pressure_resampled,
+            vc_data,
+            pressure_data,
+            None,
             None,
             algos,
             'Volume Control',
             'Pressure Control',
             'breath_by_breath_compare_algos_by_mode_monte_carlo_{}_resamps.png'.format(n_resamples),
+            absolute,
             **kwargs,
         )
 
@@ -1216,7 +1376,39 @@ class ResultsContainer(object):
         plt.savefig(figname, dpi=self.dpi)
         plt.show(fig)
 
-    def compare_window_strategies_bar_per_patient(self, windowing1, windowing2, std_or_mad, label_mask1=None, label_mask2=None):
+    def compare_window_strategies_box_per_breath(self, windowing1, windowing2, mask_name=None, algos=None, absolute=False, **kwargs):
+        """
+        Compare per-breath window strategies via boxplot. Optionally will accept a mask for more
+        fine-grained analysis.
+
+        :param windowing1: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param windowing2: None for no windowing, 'wmd' for WMD, and 'smd' for SMD
+        :param mask_name: mask name based on masks obtained from `get_masks`
+        :param algos: list of algos to display
+        :param absolute: (bool) use absolute value for results or no.
+        """
+        if mask_name is not None:
+            mask = self.get_masks()[mask_name]
+        else:
+            mask = self.get_masks()['all']
+
+        window_name1 = {None: 'No windowing', 'wmd': 'Rolling Median', 'smd': 'Sequential Median'}[windowing1]
+        window_name2 = {None: 'No windowing', 'wmd': 'Rolling Median', 'smd': 'Sequential Median'}[windowing2]
+
+        self._compare_breath_level_masks(
+            self.proc_results[mask],
+            self.proc_results[mask],
+            windowing1,
+            windowing2,
+            algos,
+            window_name1,
+            window_name2,
+            'breath_by_breath_compare_window_strats_{}_{}_{}_resamps.png'.format(windowing1, windowing2, mask_name),
+            absolute,
+            **kwargs,
+        )
+
+    def compare_window_strategies_bar_per_patient(self, windowing1, windowing2, std_or_mad, label_mask1=None, label_mask2=None, **kwargs):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts. Confidence intervals here tend to be quite
@@ -1230,7 +1422,6 @@ class ResultsContainer(object):
         """
         if (label_mask1 and not label_mask2) or (label_mask2 and not label_mask1):
             raise Exception('if you have a custom label for one mask, you must provide a custom label for the other')
-        sns.set_style('whitegrid')
         pp = self.analyze_per_patient_df(self.proc_results)
 
         ad_std1 = self.preprocess_ad_std_in_df(pp, windowing1, std_or_mad)
@@ -1249,22 +1440,29 @@ class ResultsContainer(object):
         elif std_or_mad == 'mad':
             dev = 'Median Absolute Deviation'
 
-        sns.barplot(x='Algorithm', y='Absolute Difference', hue='Window Strategy', data=ad_df, ax=axes[0], palette='Set2')
-        sns.barplot(x='Algorithm', y=dev, hue='Window Strategy', data=std_df, ax=axes[1], palette='Set2')
+        sns.barplot(x='Algorithm', y='Absolute Difference', hue='Window Strategy', data=ad_df, ax=axes[0], palette=kwargs.get('ax0_palette', 'Set2'), n_boot=self.boot_resamples, capsize=kwargs.get('capsize', None), ci=kwargs.get('ci', 95), linewidth=kwargs.get('bar_lw', None), edgecolor=kwargs.get('bar_ec', 'black'))
+        sns.barplot(x='Algorithm', y=dev, hue='Window Strategy', data=std_df, ax=axes[1], palette=kwargs.get('ax1_palette', 'Set3'), n_boot=self.boot_resamples, capsize=kwargs.get('capsize', None), ci=kwargs.get('ci', 95), linewidth=kwargs.get('bar_lw', None), edgecolor=kwargs.get('bar_ec', 'black'))
 
         for ax in axes:
             xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
-            plt.setp(xtick_names, rotation=80)
+            plt.setp(xtick_names, rotation=kwargs.get('rotation', 70))
             if label_mask1:
                 handles, labels = ax.get_legend_handles_labels()
                 new_labels = [label_mask1, label_mask2]
-                ax.legend(handles, new_labels, fontsize=24, loc='upper right')
+                ax.legend(handles, new_labels, fontsize=kwargs.get('legend_fontsize', 18), loc=kwargs.get('legend_loc', 'best'), title=kwargs.get('legend_title', 'Window Type'), title_fontsize=kwargs.get('legend_fontsize', 18))
                 ax.set_xlabel('')
-        figname = str(self.results_dir.joinpath('compare-window-strats-bar-{}-{}-mins-{}.png'.format(win1, win2, self.n_minutes)).resolve())
+                ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
+                plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
+                plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
+
+        axes[0].set_ylabel('Median $|C_{rs}^k-\hat{C}_{rs}^k|$', fontsize=kwargs.get('label_fontsize', 18))
+        axes[1].set_ylabel(dev, fontsize=kwargs.get('label_fontsize', 18))
+
+        figname = str(self.results_dir.joinpath('compare-window-strats-bar-{}-{}-{}-mins-{}.png'.format(win1, win2, std_or_mad, self.n_minutes)).resolve())
         plt.tight_layout()
         plt.savefig(figname, dpi=self.dpi)
 
-    def compare_window_lengths_bar_per_patient(self, windowing, std_or_mad, windows=[5, 10, 20, 50, 100, 200]):
+    def compare_window_lengths_bar_per_patient(self, windowing, std_or_mad, windows=[5, 10, 20, 50, 100, 200], **kwargs):
         """
         Compare results of different window types to each other on patient by patient basis.
         Plot results out with bar charts. Confidence intervals here tend to be quite
@@ -1274,16 +1472,23 @@ class ResultsContainer(object):
         :param std_or_mad: use standard deviation ('std') or MAD ('mad')
         :param windows: window lengths to compare
         """
-        def show_ad_std_plot(data, ycolname, legend):
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(3*8, 3*3))
-            sns.barplot(x='Algorithm', y=ycolname, data=data, ax=ax, hue='Window Size')
-            xtick_names = plt.setp(ax, xticklabels=[algo._text for algo in ax.get_xticklabels()])
-            plt.setp(xtick_names, rotation=75)
+        def show_ad_std_plot(data, ycolname, legend, **kwargs):
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(kwargs.get('fig_width', 3*8), kwargs.get('fig_height', 3*3)))
+            sns.barplot(x='Algorithm', y=ycolname, data=data, ax=ax, hue='Window Size', n_boot=self.boot_resamples)
+            plt.setp(ax.get_xticklabels(), rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 14))
+            plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 14))
+            if ycolname == 'Absolute Difference':
+
+                ax.set_ylabel('Median $|C_{rs}^k-\hat{C}_{rs}^k|$', fontsize=kwargs.get('label_fontsize', 18), labelpad=kwargs.get('ylabel_pad', 4.0))
+            else:
+                ax.set_ylabel(ylabel, fontsize=kwargs.get('label_fontsize', 18), labelpad=kwargs.get('ylabel_pad', 4.0))
+            ax.set_xlabel('')
             if not legend:
                 ax.get_legend().remove()
             else:
-                ax.legend(loc='upper left', title='Window Size', framealpha=0.4)
+                ax.legend(loc=kwargs.get('legend_loc', 'upper left'), title='Window Size', framealpha=kwargs.get('legend_alpha', 0.4), fontsize=kwargs.get('legend_fontsize', 22), title_fontsize=kwargs.get('legend_fontsize', 22))
 
+            ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
             plt.tight_layout()
             fig.savefig(self.results_dir.joinpath('compare_per_patient_win_lens_{}_mins_{}.png'.format(ycolname.replace(' ', '_'), self.n_minutes)).resolve(), dpi=self.dpi)
             plt.show(fig)
@@ -1319,13 +1524,12 @@ class ResultsContainer(object):
         if std_or_mad == 'std':
             ylabel = 'Standard Deviation'
         elif std_or_mad == 'mad':
-            ylabel = 'Median Absolute Deviation'
-
+            ylabel = 'MAD'
         ad_df = pd.DataFrame(ad_rows, columns=['Algorithm', 'Absolute Difference', 'Window Size'])
         std_df = pd.DataFrame(std_rows, columns=['Algorithm', ylabel, 'Window Size'])
 
-        show_ad_std_plot(ad_df, 'Absolute Difference', False)
-        show_ad_std_plot(std_df, ylabel, True)
+        show_ad_std_plot(ad_df, 'Absolute Difference', False, **kwargs)
+        show_ad_std_plot(std_df, ylabel, True, **kwargs)
 
     def compare_window_strategies_scatter_per_patient(self, windowing1, windowing2, std_or_mad, individual_patients=False, std_lim=None):
         """
@@ -1629,6 +1833,13 @@ class ResultsContainer(object):
                 (self.proc_results.artifact == 0)
             )),
             'pc_prvc': self.proc_results.ventmode.isin(['pc', 'prvc']),
+            'pc_prvc_async_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) |
+                (self.proc_results.fa != 0) |
+                (self.proc_results.static_dca != 0) |
+                (self.proc_results.dyn_dca != 0)
+            )),
             'pc_prvc_async_only_no_fam': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
                 (self.proc_results.dta != 0) |
                 (self.proc_results.bsa != 0) |
@@ -1654,29 +1865,16 @@ class ResultsContainer(object):
             'pc_prvc_dta_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
                 (self.proc_results.dta != 0)
             )),
-            'pc_prvc_fa_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
-                (self.proc_results.fa != 0)
-            )),
-            'pc_prvc_fa_mild_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
-                (self.proc_results.fa == 1)
-            )),
-            'pc_prvc_fa_mod_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
-                (self.proc_results.fa == 2)
-            )),
-            'pc_prvc_fa_sev_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
-                (self.proc_results.fa == 3)
-            )),
-            'pc_prvc_fa_no_fam_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
-                (self.proc_results.fa > 1)
+            'pc_prvc_async_no_dca_only': ((self.proc_results.ventmode.isin(['pc', 'prvc'])) & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) &
+                (self.proc_results.static_dca == 0) &
+                (self.proc_results.dyn_dca == 0)
             )),
             'prvc_only': (self.proc_results.ventmode == 'prvc'),
             'vc_only': (self.proc_results.ventmode == 'vc'),
             'vc_bsa_only': ((self.proc_results.ventmode == 'vc') & (
                 (self.proc_results.bsa != 0)
-            )),
-            'vc_dca_only': ((self.proc_results.ventmode == 'vc') & (
-                (self.proc_results.static_dca != 0) |
-                (self.proc_results.dyn_dca != 0)
             )),
             'vc_dta_only': ((self.proc_results.ventmode == 'vc') & (
                 (self.proc_results.dta != 0)
@@ -1706,6 +1904,11 @@ class ResultsContainer(object):
                 (self.proc_results.fa > 1) |
                 (self.proc_results.static_dca != 0) |
                 (self.proc_results.dyn_dca != 0)
+            )),
+            'vc_async_no_fa_only': ((self.proc_results.ventmode == 'vc') & (
+                (self.proc_results.dta != 0) |
+                (self.proc_results.bsa != 0) &
+                (self.proc_results.fa == 0)
             )),
             'vc_no_async': ((self.proc_results.ventmode == 'vc') & (
                 (self.proc_results.dta == 0) &
@@ -1739,7 +1942,7 @@ class ResultsContainer(object):
 
         return ad_std
 
-    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, algos=None, **kwargs):
+    def plot_algo_scatter(self, df, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, algos=None, highlight_algos=None, **kwargs):
         """
         Perform scatterplot for all available algos based on an input per-patient dataframe.
 
@@ -1748,7 +1951,7 @@ class ResultsContainer(object):
         if algos is not None:
             df = df[df.algo.isin(algos)]
         ad_std = self.preprocess_ad_std_in_df(df, windowing, std_or_mad)
-        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, **kwargs)
+        self._ad_std_scatter(ad_std, windowing, plt_title, figname, individual_patients, std_lim, std_or_mad, highlight_algos=highlight_algos, **kwargs)
 
     def plot_algo_ad_std_boxplots(self, df, windowing, figname_prefix):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
@@ -1771,7 +1974,7 @@ class ResultsContainer(object):
         plt.tight_layout()
         fig.savefig(self.results_dir.joinpath('{}_std_windowing_{}_boxplot_result-mins-{}.png'.format(windowing, figname_prefix, self.n_minutes)).resolve(), dpi=self.dpi)
 
-    def show_individual_breath_by_breath_frame_results(self, df, figname, windowing):
+    def show_individual_breath_by_breath_frame_results(self, df, figname, windowing, **kwargs):
         fig, ax = plt.subplots(figsize=(3*8, 3*3))
         algos_in_frame = set(df.columns).intersection(self.algos_used)
         if windowing is None:
@@ -1788,16 +1991,21 @@ class ResultsContainer(object):
             proc_frame.medians.values,
             notch=False,
             bootstrap=None,
-            palette=[self.algo_colors[algo] for algo in algos_in_order]
+            palette=[self.algo_colors[algo] for algo in algos_in_order],
+            linewidth=kwargs.get('box_lw', None),
         )
-        xtick_names = plt.setp(ax, xticklabels=algos_in_order)
-        plt.setp(xtick_names, rotation=60, fontsize=14)
+        xtick_names = plt.setp(ax, xticklabels=[FileCalculations.shorthand_name_mapping[algo] for algo in sorted(self.algos_used)])
+        plt.setp(xtick_names, rotation=kwargs.get('rotation', 60), fontsize=kwargs.get('tick_fontsize', 18))
+        plt.setp(ax.get_yticklabels(), fontsize=kwargs.get('tick_fontsize', 18))
         xlim = ax.get_xlim()
-        ax.plot(xlim, [0, 0], ls='--', zorder=0, c='red')
-        ax.set_ylabel('Difference between Compliance and Algo', fontsize=16)
-        ax.set_xlabel('Algorithm', fontsize=16)
+        ax.plot(xlim, [0, 0], ls='--', zorder=0.9, c='red', lw=kwargs.get('lw', 4))
+        ax.set_xlim(xlim)
+        ax.set_xlabel('')
+        ax.set_ylabel(self.label_diff, fontsize=kwargs.get('label_fontsize', 16))
         title = figname.replace('.png', '').replace('_', ' ').replace('-', ': ')
-        ax.set_title(title, fontsize=20)
+        ax.set_title(title, fontsize=20, pad=25.0)
+        ax.grid(False)
+        ax.grid(True, lw=kwargs.get('grid_lw', 1), alpha=kwargs.get('grid_alpha', None), axis='y')
         plt.tight_layout()
         fig.savefig(self.results_dir.joinpath(figname).resolve(), dpi=self.dpi)
 
@@ -2001,7 +2209,7 @@ class ResultsContainer(object):
         """
         self._perform_single_window_analysis(self.proc_results, absolute, winsorizor, algos, robust, robust_and_reg, show_median)
 
-    def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[], windowing=None):
+    def plot_breath_by_breath_results(self, only_patient=None, exclude_cols=[], windowing=None, **kwargs):
         only_patient_wrapper = lambda df, pt: df[df.patient == pt] if pt is not None else df
         exclude_algos_wrapper = lambda df, cols: df.drop(cols, axis=1) if exclude_cols else df
         windowing_mod = lambda x, y: x.replace('.png', '-windowing-{}-mins-{}.png'.format(y, self.n_minutes))
@@ -2009,96 +2217,132 @@ class ResultsContainer(object):
             exclude_algos_wrapper(only_patient_wrapper(self.proc_results, only_patient), exclude_cols),
             windowing_mod('breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('vc_only_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('vc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['vc_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('vc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_only_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['pc_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('prvc_only_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('prvc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['prvc_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('prvc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['no_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('no_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['early_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('early_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['insp_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('insp_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['exp_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('exp_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_efforting'][self.window_n], only_patient), exclude_cols),
             windowing_mod('all_efforting_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_prvc_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_no_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_prvc_no_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
+
         self.show_individual_breath_by_breath_frame_results(
             exclude_algos_wrapper(only_patient_wrapper(self.bb_frames['all_pressure_only_async'][self.window_n], only_patient), exclude_cols),
             windowing_mod('pc_prvc_only_async_breath_by_breath_results.png', windowing),
             windowing,
+            **kwargs,
         )
 
     def plot_per_patient_results(self, windowing, std_or_mad, individual_patients=False, show_boxplots=True, std_lim=None, **kwargs):

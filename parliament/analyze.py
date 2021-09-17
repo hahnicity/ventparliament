@@ -35,6 +35,13 @@ class FileCalculations(object):
     # friendly names for the algorithms
     algo_name_mapping = {
         'al_rawas': 'Al-Rawas',
+        'al_rawas_ar': 'Al-Rawas',
+        'al_rawas_bru': 'Al-Rawas w/ Brunner TC',
+        'al_rawas_fuz': 'Al-Rawas w/ Fuzzy Clust TC',
+        'al_rawas_ikd': 'Al-Rawas w/ Ikeda TC',
+        'al_rawas_lren': 'Al-Rawas w/ Lourens TC',
+        'al_rawas_vic': 'Al-Rawas w/ Vicarios TC',
+        'al_rawas_wri': 'Al-Rawas w/ Wiriyaporn TC',
         'ft_insp_lstsq': 'Flow-targeted Inspiratory Least Squares',
         'howe_lstsq': "Howe Least Squares",
         'iimipr': 'IIMIPR',
@@ -49,9 +56,24 @@ class FileCalculations(object):
         'pt_insp_lstsq': 'Pressure Targeted Inspiratory Least Squares',
         'vicario_co': 'Vicario Constrained Optimization',
         'vicario_nieap': 'Vicario Non-Invasive Estimation of Alveolar Pressure',
+        'vicario_nieap_ar': 'Vicario w/ Al-Rawas TC',
+        'vicario_nieap_bru': 'Vicario w/ Brunner TC',
+        'vicario_nieap_fuz': 'Vicario w/ Fuzzy Clust TC',
+        'vicario_nieap_ikd': 'Vicario w/ Ikeda TC',
+        'vicario_nieap_lren': 'Vicario w/ Lourens TC',
+        'vicario_nieap_vic': 'Vicario',
+        'vicario_nieap_wri': 'Vicario w/ Wiriyaporn TC',
+
     }
     shorthand_name_mapping = {
         'al_rawas': 'Al-Rawas',
+        'al_rawas_ar': 'Al-Rawas',
+        'al_rawas_bru': 'Al-Rawas w/ Brunner TC',
+        'al_rawas_fuz': 'Al-Rawas w/ Fuzzy Clust TC',
+        'al_rawas_ikd': 'Al-Rawas w/ Ikeda TC',
+        'al_rawas_lren': 'Al-Rawas w/ Lourens TC',
+        'al_rawas_vic': 'Al-Rawas w/ Vicarios TC',
+        'al_rawas_wri': 'Al-Rawas w/ Wiriyaporn TC',
         'ft_insp_lstsq': 'Flow Insp Least Sq',
         'howe_lstsq': "Howe",
         'iimipr': 'IIMIPR',
@@ -66,6 +88,13 @@ class FileCalculations(object):
         'pt_insp_lstsq': 'Pressure Insp Least Sq',
         'vicario_co': 'Constrained Optim',
         'vicario_nieap': 'Vicario Non-Inv Estim',
+        'vicario_nieap_ar': 'Vicario w/ Al-Rawas TC',
+        'vicario_nieap_bru': 'Vicario w/ Brunner TC',
+        'vicario_nieap_fuz': 'Vicario w/ Fuzzy Clust TC',
+        'vicario_nieap_ikd': 'Vicario w/ Ikeda TC',
+        'vicario_nieap_lren': 'Vicario w/ Lourens TC',
+        'vicario_nieap_vic': 'Vicario',
+        'vicario_nieap_wri': 'Vicario w/ Wiriyaporn TC',
     }
     # pt exp least squares algos are available for pc/prvc because pressure
     # should theoretically operate similarly between different modes during
@@ -77,8 +106,8 @@ class FileCalculations(object):
     algos_unavailable_for_vc = ['kannangara', 'ft_insp_lstsq']
     # XXX leave this off for now because we have decided not to add this
     # analysis in the current paper
-    #algos_with_tc = ['al_rawas', 'vicario_nieap']
-    algos_with_tc = []
+    algos_with_tc = ['al_rawas', 'vicario_nieap']
+    #algos_with_tc = []
 
     def __init__(self, patient, filename, algorithms_to_use, peeps_to_use, extra_breath_info, recorded_compliance=None, recorded_plat=None, no_algo_restrict=False, **kwargs):
         """
@@ -265,7 +294,7 @@ class FileCalculations(object):
             self.breath_volumes[breath_idx] = vols
             return vols
 
-    def _get_breath_peep_from_ei_data(self, rel_bn, breath):
+    def _get_breath_peep_from_ei_data(self, rel_bn, breath, breath_idx):
         ei_row = self.extra_breath_info[self.extra_breath_info.rel_bn == rel_bn].iloc[0]
         ventmode = ei_row.ventmode
         per_breath_peep = np.mean(breath['pressure'][-5:])
@@ -300,7 +329,7 @@ class FileCalculations(object):
         rel_bn = breath['rel_bn']
 
         if len(self.extra_breath_info) > 0:
-            peep = self._get_breath_peep_from_ei_data(rel_bn, breath)
+            peep = self._get_breath_peep_from_ei_data(rel_bn, breath, breath_idx)
         else:
             min_idx = 0 if breath_idx-self.peeps_to_use < 0 else breath_idx-self.peeps_to_use
             peep = np.median([row.PEEP for row in self.breath_metadata[min_idx:breath_idx+1]])
@@ -353,7 +382,7 @@ class FileCalculations(object):
             tc_results.append(algo(breath_idx, tau))
         return np.array(tc_results)
 
-    def al_rawas(self, breath_idx):
+    def al_rawas(self, breath_idx, tau):
         """
         Perform Al-Rawas' algorithm for finding compliance.
 
@@ -363,7 +392,6 @@ class FileCalculations(object):
         bm = self.breath_metadata[breath_idx]
         flow_l_s = np.array(breath['flow']) / 60
         vols = self._calc_breath_volume(breath_idx)
-        tau = self.al_rawas_tau(breath_idx)
         tau, plat, comp, res = al_rawas_calcs(
             flow_l_s,
             vols,
@@ -775,13 +803,12 @@ class FileCalculations(object):
             return np.nan
         return 1 / elas
 
-    def vicario_nieap(self, breath_idx):
+    def vicario_nieap(self, breath_idx, tau):
         """
         Perform vicario's method for NonInvasive Estimation of Alveolar Pressure (NIEAP).
 
         :param breath_idx: relative index of the breath we want to analyze in our file.
         """
-        tau = self.vicario_nieap_tau(breath_idx)
         if tau is np.nan:
             return np.nan
         breath = self.breath_data[breath_idx]
