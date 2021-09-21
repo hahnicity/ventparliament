@@ -2552,6 +2552,18 @@ class ResultsContainer(object):
         if show_boxplots:
             self.plot_algo_ad_std_boxplots(self.pp_frames['all_pressure_only'][self.window_n], windowing, 'pressure_only_pbp')
 
+        # PC/PRVC only no async
+        self.plot_algo_scatter(
+            self.pp_frames['all_pressure_no_async'][self.window_n],
+            windowing,
+            'Patient by patient results. PC/PRVC only. No Asynchrony',
+            windowing_mod('patient_by_patient_pc_prvc_no_async.png', windowing),
+            individual_patients,
+            std_lim,
+            std_or_mad,
+            **kwargs,
+        )
+
         # I go back and forth in between questioning whether this belongs here or in per_patient
         if show_boxplots:
             for algo in self.algos_used:
