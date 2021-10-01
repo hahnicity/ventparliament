@@ -13,14 +13,12 @@ dependencies:
   - jupyter
   - pip
   - scikit-learn
-  - scikit-image
   - pip:
     - git+git://github.com/lukauskas/dtwco.git#egg=dtwco
     - beautifulsoup4
     - colorcet
     - git+https://github.com/hahnicity/fuzzy-clustering.git
     - prettytable
-    - statsmodels
     - ventmap>=1.4.7
     - nose
 channels:
