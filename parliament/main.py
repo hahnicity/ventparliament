@@ -6,6 +6,7 @@ Main analysis code
 """
 import argparse
 from copy import copy
+import numbers
 from pathlib import Path
 import re
 import sys
